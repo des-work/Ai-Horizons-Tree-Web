@@ -2,62 +2,161 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SkillTreeData, NodeType } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+
+// Initialize lazily to prevent crashes if API key is missing at startup
+const getAiClient = () => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    console.warn("Gemini API Key is missing. Using fallback data.");
+    return null;
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 // Default fallback data with 3 distinct CORE roots and bottom-up flow
 export const FALLBACK_DATA: SkillTreeData = {
   nodes: [
-    // --- LEVEL 0: ROOTS (CORE) ---
-    { id: "c1", label: "Theoretical Foundations", category: NodeType.CORE, description: "The mathematical and scientific principles underpinning artificial intelligence, including calculus, linear algebra, and probability.", difficulty: "Advanced", tags: ["Math", "Theory"] },
-    { id: "c2", label: "Engineering Infrastructure", category: NodeType.CORE, description: "The hardware, cloud systems, and deployment pipelines necessary to run and scale AI models.", difficulty: "Intermediate", tags: ["DevOps", "Systems"] },
-    { id: "c3", label: "Human-AI Interaction", category: NodeType.CORE, description: "The design, psychology, and interface patterns that define how humans collaborate with intelligent systems.", difficulty: "Beginner", tags: ["UX", "Design"] },
+    // --- LEVEL 0: ROOT (CORE) ---
+    {
+      id: "root",
+      label: "Domain Knowledge",
+      category: NodeType.CORE,
+      description: "This is the foundation of everything. It represents your specific area of expertise—whether that's Nursing, Law, Biology, or Engineering. AI isn't magic; it needs your deep understanding of a subject to be truly useful. Think of this as the 'fuel' that powers the AI engine.",
+      difficulty: "Advanced",
+      tags: ["Foundation", "Domain"],
+      link: "https://en.wikipedia.org/wiki/Domain_knowledge"
+    },
 
-    // --- LEVEL 1: SKILLS ---
-    { id: "sk1", label: "Prompt Engineering", category: NodeType.SKILL, description: "The skill of crafting precise inputs (prompts) to guide Large Language Models (LLMs) toward desired outputs.", difficulty: "Beginner", tags: ["Prompting", "Communication"] },
-    { id: "sk2", label: "Vibe Coding", category: NodeType.SKILL, description: "A modern coding approach prioritizing flow and intuition, often using natural language to generate code via AI.", difficulty: "Intermediate", tags: ["FutureOfWork", "Coding"] },
-    { id: "con1", label: "LLM Architecture", category: NodeType.CONCEPT, description: "Understanding the Transformer architecture and attention mechanisms that power tools like GPT and Gemini.", difficulty: "Advanced", tags: ["NLP", "Deep Learning"] },
+    // --- LEVEL 1: INFRASTRUCTURE ---
+    {
+      id: "inf1",
+      label: "Automation",
+      category: NodeType.INFRASTRUCTURE,
+      description: "Workflow automation tools like n8n act as the 'glue' of the internet. They let you connect different apps (like Gmail, Slack, and Google Sheets) to talk to each other without writing complex code. Imagine having a digital assistant that automatically moves data where it needs to go.",
+      difficulty: "Intermediate",
+      tags: ["Automation", "Workflow"],
+      link: "https://n8n.io/"
+    },
+    {
+      id: "inf2",
+      label: "Containerization",
+      category: NodeType.INFRASTRUCTURE,
+      description: "Platforms like Docker are like shipping containers for software. They package up an application with everything it needs to run, so it works exactly the same way on your laptop as it does on a giant server in the cloud. It stops the 'it works on my machine' problem.",
+      difficulty: "Intermediate",
+      tags: ["DevOps", "Containers"],
+      link: "https://www.docker.com/"
+    },
+    {
+      id: "inf3",
+      label: "Version Control",
+      category: NodeType.INFRASTRUCTURE,
+      description: "Platforms like GitHub are like a time machine for your code. They save every version of your work, so if you make a mistake, you can easily go back. They also let teams work on the same project at the same time without overwriting each other's changes.",
+      difficulty: "Beginner",
+      tags: ["Collaboration", "Git"],
+      link: "https://github.com/"
+    },
 
-    // --- LEVEL 2: INFRASTRUCTURE (Enablers) ---
-    { id: "t1", label: "GitHub", category: NodeType.INFRASTRUCTURE, description: "The essential platform for version control and collaboration. While not an AI tool itself, it is where the AI ecosystem lives, hosting datasets, model weights, and open-source agents.", difficulty: "Beginner", tags: ["Collaboration", "Git"] },
-    { id: "t2", label: "Docker", category: NodeType.INFRASTRUCTURE, description: "A tool for containerization. It is critical for AI to ensure that models run consistently across different machines, but it is a general software engineering tool, not specific to AI.", difficulty: "Intermediate", tags: ["Containers", "DevOps"] },
-    
-    // --- LEVEL 2.5: TOOLS (AI Specific) ---
-    { id: "t3", label: "Ollama", category: NodeType.TOOL, description: "An open-source tool that allows you to run powerful LLMs (like Llama 3) locally on your own machine without needing a cloud API.", difficulty: "Intermediate", tags: ["Local AI", "Privacy"] },
-    
-    // --- LEVEL 3: ADVANCED APPS ---
-    { id: "t4", label: "ChatGPT", category: NodeType.TOOL, description: "OpenAI's consumer-facing AI chat interface. It popularized RLHF (Reinforcement Learning from Human Feedback) for conversational capabilities.", difficulty: "Beginner", tags: ["Chat", "Assistant"] },
-    { id: "t5", label: "Google Gemini", category: NodeType.TOOL, description: "Google's native multimodal model capable of reasoning across text, images, video, and code seamlessly in a single context window.", difficulty: "Intermediate", tags: ["Multimodal", "Reasoning"] },
-    { id: "t6", label: "ComfyUI", category: NodeType.TOOL, description: "A node-based graphical user interface for Stable Diffusion. It allows for complex, modular image generation workflows.", difficulty: "Advanced", tags: ["Generative Art", "Nodes"] },
-    
-    // --- LEVEL 4: ORCHESTRATION & FUTURE ---
-    { id: "t7", label: "n8n", category: NodeType.INFRASTRUCTURE, description: "A workflow automation platform. It acts as the 'glue' connecting AI agents to other apps (Slack, Email). It is a general automation tool enhanced by AI.", difficulty: "Intermediate", tags: ["Automation", "Low-Code"] },
-    { id: "con2", label: "Google Antigravity", category: NodeType.CONCEPT, description: "A metaphorical or experimental design paradigm representing fluid, physics-defying interfaces where AI elements float and reorganize dynamically.", difficulty: "Advanced", tags: ["Experimental", "UI/UX"] },
+    // --- LEVEL 2: SKILL ---
+    {
+      id: "sk1",
+      label: "Vibe Coding",
+      category: NodeType.SKILL,
+      description: "Vibe Coding is a modern way of building software where you focus on the 'flow' and the outcome rather than getting stuck on syntax. It's about using AI to handle the heavy lifting of writing code, while you direct the logic and creativity, like a conductor leading an orchestra.",
+      difficulty: "Intermediate",
+      tags: ["Coding", "Flow"],
+      link: "https://twitter.com/karpathy/status/1754213778556539356" // Karpathy's tweet on the concept
+    },
 
+    // --- LEVEL 3: TOOLS & CONCEPTS ---
+    {
+      id: "t2",
+      label: "Cursor",
+      category: NodeType.CONCEPT,
+      description: "Cursor is a code editor built for the AI era. It looks like VS Code but has AI built right into the core. It can predict your next edit, explain bugs, and even write entire functions for you. It's like having a senior developer sitting next to you 24/7.",
+      difficulty: "Intermediate",
+      tags: ["Editor", "AI"],
+      link: "https://cursor.sh/"
+    },
+    {
+      id: "t3",
+      label: "ChatGPT Codex",
+      category: NodeType.CONCEPT,
+      description: "Codex is the engine under the hood of many AI coding tools. It's a version of GPT trained specifically on billions of lines of code. It understands programming languages like it understands English, allowing it to translate your instructions directly into working software.",
+      difficulty: "Advanced",
+      tags: ["Code Generation", "Model"],
+      link: "https://openai.com/blog/openai-codex"
+    },
+    {
+      id: "con1",
+      label: "Antigravity",
+      category: NodeType.CONCEPT,
+      description: "Antigravity is an experimental design paradigm that aims to make software feel weightless and fluid. It uses physics-based animations and intuitive interactions to create interfaces that feel more like natural extensions of your mind than rigid computer programs.",
+      difficulty: "Advanced",
+      tags: ["UI/UX", "Experimental"],
+      link: "https://www.antigravity.com/" // Placeholder/Concept link
+    },
+    {
+      id: "t4",
+      label: "Ollama",
+      category: NodeType.CONCEPT,
+      description: "Ollama is a tool that lets you run powerful AI models locally on your own computer, instead of sending your data to the cloud. It's great for privacy and for working offline. Think of it as having your own private AI lab right on your laptop.",
+      difficulty: "Intermediate",
+      tags: ["Local AI", "Privacy"],
+      link: "https://ollama.com/"
+    },
+
+    // --- LEVEL 4: ADVANCED MODELS ---
+    {
+      id: "adv1",
+      label: "Google Gemini",
+      category: NodeType.TOOL,
+      description: "Gemini is Google's most capable AI model. It's 'multimodal', meaning it can understand and reason across text, images, video, and audio all at once. It's designed to be a helpful assistant that can handle complex tasks like coding, writing, and visual analysis.",
+      difficulty: "Advanced",
+      tags: ["Multimodal", "Reasoning"],
+      link: "https://deepmind.google/technologies/gemini/"
+    },
+    {
+      id: "adv2",
+      label: "ChatGPT",
+      category: NodeType.TOOL,
+      description: "ChatGPT is the AI chatbot that started the revolution. It's an advanced conversational assistant that can help you draft emails, write code, learn new topics, and brainstorm ideas. It's like a super-smart research assistant that's always available.",
+      difficulty: "Beginner",
+      tags: ["Chat", "Assistant"],
+      link: "https://chat.openai.com/"
+    },
+    {
+      id: "sk2",
+      label: "Model Selection",
+      category: NodeType.TOOL,
+      description: "Model Selection isn't just a tool; it's the skill of knowing which AI brain to use for which job. Just like you wouldn't use a hammer to drive a screw, you need to know when to use a fast, cheap model versus a slow, powerful one. It's about optimizing for cost, speed, and intelligence.",
+      difficulty: "Advanced",
+      tags: ["Strategy", "Optimization"],
+      link: "https://huggingface.co/models"
+    },
   ],
   links: [
-    // Foundations
-    { source: "c1", target: "con1", relationship: "underpins" },
-    { source: "c2", target: "t1", relationship: "stores code in" },
-    { source: "c2", target: "t2", relationship: "runs environments in" },
-    { source: "c3", target: "sk1", relationship: "requires" },
+    // Level 0 -> Level 1
+    { source: "root", target: "inf1", relationship: "automates" },
+    { source: "root", target: "inf2", relationship: "runs on" },
+    { source: "root", target: "inf3", relationship: "stored in" },
 
-    // Mid-Level
-    { source: "con1", target: "t5", relationship: "enables" },
-    { source: "con1", target: "t4", relationship: "enables" },
-    { source: "t2", target: "t3", relationship: "hosts" },
-    { source: "t1", target: "sk2", relationship: "facilitates sharing for" },
+    // Level 1 -> Level 2
+    { source: "inf1", target: "sk1", relationship: "enables" },
+    { source: "inf2", target: "sk1", relationship: "supports" },
+    { source: "inf3", target: "sk1", relationship: "facilitates" },
 
-    // Advanced Connections
-    { source: "sk2", target: "t7", relationship: "automates via" }, // Vibe coding -> n8n
-    { source: "t3", target: "t6", relationship: "generates assets for" }, // Ollama -> ComfyUI
-    { source: "sk1", target: "t4", relationship: "optimizes" },
-    
-    // Gemini Integration
-    { source: "t5", target: "con2", relationship: "inspires" }, // Gemini -> Antigravity
-    { source: "t5", target: "t7", relationship: "powers agents in" }, // Gemini -> n8n
-    
-    // Cross links
-    { source: "sk1", target: "t6", relationship: "guides generation in" }
+    // Level 2 -> Level 3
+    { source: "sk1", target: "t2", relationship: "uses" },
+    { source: "sk1", target: "t3", relationship: "powered by" },
+    { source: "sk1", target: "con1", relationship: "explores" },
+    { source: "sk1", target: "t4", relationship: "deploys" },
+
+    // Level 3 -> Level 4
+    { source: "con1", target: "adv1", relationship: "visualizes" }, // Antigravity -> Gemini
+    { source: "t3", target: "adv2", relationship: "powers" }, // Codex -> ChatGPT
+    { source: "t4", target: "sk2", relationship: "requires" }, // Ollama -> Model Selection
+    { source: "t2", target: "adv2", relationship: "integrates" } // Cursor -> ChatGPT (Optional, keeping for structure)
   ]
 };
 
@@ -69,38 +168,47 @@ export const generateSkillTree = async (topic: string): Promise<SkillTreeData> =
       
       TASK: Create a hierarchical "Skill Tree" visualization that explains how AI tools and concepts apply specifically to "${topic}".
       
-      CRITICAL STRUCTURE RULES (BOTTOM-UP):
-      1. Start with exactly 3 "CORE" nodes at the bottom. 
-         - Core 1: Foundations (Relevant theoretical basics for ${topic})
-         - Core 2: Infrastructure (The necessary environment/systems for ${topic})
-         - Core 3: Application/Interaction (How users in ${topic} interact with AI)
-      2. All other nodes must flow upwards from these cores.
+      CRITICAL STRUCTURE RULES (Strict 5-Level Hierarchy):
+      1. **LEVEL 0 (ROOT)**: Start with exactly 1 CORE node: "Domain Knowledge". This represents the user's specific field (${topic}).
+      2. **LEVEL 1 (INFRASTRUCTURE)**: Must include "Automation" (e.g., n8n), "Containerization" (e.g., Docker), "Version Control" (e.g., GitHub). These flow FROM Domain Knowledge.
+      3. **LEVEL 2 (SKILL)**: Must include "Vibe Coding". This flows FROM Level 1 nodes.
+      4. **LEVEL 3 (TOOLS)**: Must include "Cursor", "ChatGPT Codex", "Antigravity", "Ollama". These flow FROM Vibe Coding.
+      5. **LEVEL 4 (ADVANCED)**: Must include "Google Gemini", "ChatGPT", "Model Selection".
+         - "Google Gemini" must flow FROM "Antigravity".
+         - "ChatGPT" must flow FROM "ChatGPT Codex".
+         - "Model Selection" must flow FROM "Ollama".
       
       CLASSIFICATION RULES:
-      - **INFRASTRUCTURE**: Use this category for tools that are NOT AI themselves but are essential for the ecosystem (e.g., GitHub, Docker, n8n).
-      - **TOOL**: Use this category for actual AI models or AI-powered applications (e.g., ChatGPT, Gemini, Ollama, ComfyUI).
-      
-      MANDATORY NODES (Connect these to the user's topic, explaining their specific relevance):
-      - Google Antigravity (Concept: Breaking boundaries/Physics of UI/New Paradigms)
-      - GitHub (Category: INFRASTRUCTURE. Relevance: Collaboration/Sharing Knowledge)
-      - Docker (Category: INFRASTRUCTURE. Relevance: Consistency/Environment)
-      - Ollama (Category: TOOL. Relevance: Privacy/Local Operation)
-      - ComfyUI (Category: TOOL. Relevance: Visual/Diagram Generation)
-      - n8n (Category: INFRASTRUCTURE. Relevance: Workflow Automation)
-      - ChatGPT (Category: TOOL. Relevance: Assistant/Reasoning)
-      - Google Gemini (Category: TOOL. Relevance: Multimodal Analysis)
+      - **SKILL**: Vibe Coding.
+      - **TOOL**: Google Gemini, ChatGPT, Model Selection.
+      - **CONCEPT**: Cursor, ChatGPT Codex, Antigravity, Ollama, Domain Knowledge.
       
       CONTENT REQUIREMENTS:
       - **ACCURACY IS PARAMOUNT**. Descriptions must be factually correct.
-      - **CONTEXTUALIZE**: If the topic is "Nursing", describe "GitHub" as a place to share research protocols, or "Ollama" as a way to run HIPAA-compliant local models. Do not just give generic tech definitions.
-      - Link 'relationship' text should explain WHY they are connected in this specific context.
+      - **SIMPLE LANGUAGE**: Explain concepts as if to a non-technical friend. Use analogies. Avoid jargon where possible.
+      - **LINKS**: You MUST provide a valid 'link' field for every node pointing to the official website or a high-quality resource.
+      - **TAGS**: Provide 2-3 relevant tags.
       
-      Output JSON format.
+      JSON FORMAT:
+      Return ONLY a raw JSON object with this structure:
+      {
+        "nodes": [
+          { "id": "string", "label": "string", "category": "NodeType", "description": "string", "difficulty": "string", "tags": ["string"], "link": "https://..." }
+        ],
+        "links": [
+          { "source": "id", "target": "id", "relationship": "string" }
+        ]
+      }
     `;
 
+    const ai = getAiClient();
+    if (!ai) {
+      return FALLBACK_DATA;
+    }
+
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
+      model: "gemini-2.0-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -117,6 +225,7 @@ export const generateSkillTree = async (topic: string): Promise<SkillTreeData> =
                   description: { type: Type.STRING },
                   difficulty: { type: Type.STRING, enum: ["Beginner", "Intermediate", "Advanced"] },
                   tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  link: { type: Type.STRING },
                   resources: { type: Type.ARRAY, items: { type: Type.STRING } }
                 },
                 required: ["id", "label", "category", "description", "difficulty", "tags"]
@@ -140,7 +249,7 @@ export const generateSkillTree = async (topic: string): Promise<SkillTreeData> =
       }
     });
 
-    const text = response.text;
+    const text = response.text();
     if (!text) throw new Error("No data returned from AI");
 
     const data = JSON.parse(text) as SkillTreeData;

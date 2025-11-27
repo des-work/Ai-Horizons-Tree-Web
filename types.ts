@@ -14,12 +14,13 @@ export interface SkillNode {
   difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
   tags: string[];
   resources?: string[];
+  link?: string;
 }
 
 export interface SkillLink {
   source: string;
   target: string;
-  relationship: string; // Describes why they are connected, e.g., "enables", "requires", "enhances"
+  relationship: string;
 }
 
 export interface SkillTreeData {
@@ -32,6 +33,7 @@ export interface SimulationNode extends SkillNode {
   y?: number;
   fx?: number | null;
   fy?: number | null;
+  level?: number;
 }
 
 export interface SimulationLink {

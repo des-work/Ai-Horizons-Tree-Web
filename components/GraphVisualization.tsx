@@ -13,7 +13,7 @@ interface GraphVisualizationProps {
 
 const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeClick, selectedNodeId, width, height }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  
+
   // Sunrise Palette
   const getColor = (category: string) => {
     switch (category) {
@@ -71,7 +71,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeCli
 
     let maxLevel = 0;
     nodes.forEach(n => {
-      const lvl = levels[n.id] !== undefined ? levels[n.id] : 1; 
+      const lvl = levels[n.id] !== undefined ? levels[n.id] : 1;
       (n as any).level = lvl;
       if (lvl > maxLevel) maxLevel = lvl;
     });
@@ -93,7 +93,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeCli
 
     // --- SETUP LAYOUT ---
     const g = svg.append("g").attr("class", "graph-container");
-    
+
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
       .on("zoom", (event) => {
@@ -134,18 +134,18 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeCli
     const simulation = d3.forceSimulation(nodes)
       .force("link", d3.forceLink(links)
         .id((d: any) => d.id)
-        .distance(120)
+        .distance(180) // Increased from 120
         .strength(0.4)
       )
-      .force("charge", d3.forceManyBody().strength(-400))
-      .force("collide", d3.forceCollide().radius((d: any) => getRadius(d.category) + 15).iterations(2))
+      .force("charge", d3.forceManyBody().strength(-800)) // Increased from -400
+      .force("collide", d3.forceCollide().radius((d: any) => getRadius(d.category) + 30).iterations(2)) // Increased padding
       .force("y", d3.forceY().y((d: any) => {
-          const level = (d as any).level || 0;
-          const ratio = level / Math.max(maxLevel, 1);
-          return bottomY - (ratio * availableH);
-        }).strength(1.2)
+        const level = (d as any).level || 0;
+        const ratio = level / Math.max(maxLevel, 1);
+        return bottomY - (ratio * availableH);
+      }).strength(1.2)
       )
-      .force("x", d3.forceX(width/2).strength(0.05));
+      .force("x", d3.forceX(width / 2).strength(0.05));
 
     // --- DRAWING ---
 
@@ -254,62 +254,62 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeCli
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
-    
+
     if (!selectedNodeId) {
-       // Reset state
-       svg.selectAll(".node, .link").transition().duration(300).style("opacity", 1);
-       return;
+      // Reset state
+      svg.selectAll(".node, .link").transition().duration(300).style("opacity", 1);
+      return;
     }
 
     // Identify connected nodes and links
     const activeNodeIds = new Set<string>();
     const activeLinkIndices = new Set<number>();
-    
+
     activeNodeIds.add(selectedNodeId);
 
     // D3 binds data to elements. We can iterate the data to find connections.
     // Note: After simulation, links have source/target as Node objects
     data.links.forEach((l, i) => {
-       const sId = typeof l.source === 'object' ? (l.source as any).id : l.source;
-       const tId = typeof l.target === 'object' ? (l.target as any).id : l.target;
+      const sId = typeof l.source === 'object' ? (l.source as any).id : l.source;
+      const tId = typeof l.target === 'object' ? (l.target as any).id : l.target;
 
-       // Highlight if connected to selection
-       if (sId === selectedNodeId || tId === selectedNodeId) {
-           activeNodeIds.add(sId);
-           activeNodeIds.add(tId);
-           activeLinkIndices.add(i);
-       }
+      // Highlight if connected to selection
+      if (sId === selectedNodeId || tId === selectedNodeId) {
+        activeNodeIds.add(sId);
+        activeNodeIds.add(tId);
+        activeLinkIndices.add(i);
+      }
     });
 
     // Apply styles
     svg.selectAll(".node")
-       .transition().duration(300)
-       .style("opacity", (d: any) => activeNodeIds.has(d.id) ? 1 : 0.1);
-    
+      .transition().duration(300)
+      .style("opacity", (d: any) => activeNodeIds.has(d.id) ? 1 : 0.1);
+
     svg.selectAll(".link")
-       .transition().duration(300)
-       .style("opacity", (d: any, i) => activeLinkIndices.has(i) ? 1 : 0.05)
-       .attr("stroke", (d: any, i) => activeLinkIndices.has(i) ? "#fbbf24" : "#64748b") // Highlight color (Amber)
-       .attr("stroke-width", (d: any, i) => activeLinkIndices.has(i) ? 3 : 2);
+      .transition().duration(300)
+      .style("opacity", (d: any, i) => activeLinkIndices.has(i) ? 1 : 0.05)
+      .attr("stroke", (d: any, i) => activeLinkIndices.has(i) ? "#fbbf24" : "#64748b") // Highlight color (Amber)
+      .attr("stroke-width", (d: any, i) => activeLinkIndices.has(i) ? 3 : 2);
 
   }, [selectedNodeId, data]); // Run when selection changes
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-slate-900">
-       {/* Orientation Hint */}
-       <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-4 opacity-30 pointer-events-none">
-           <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-purple-300">Zenith</div>
-           <div className="w-px h-32 bg-gradient-to-b from-purple-400 via-orange-400 to-orange-600"></div>
-           <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-orange-500">Horizon</div>
-       </div>
+      {/* Orientation Hint */}
+      <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-4 opacity-30 pointer-events-none">
+        <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-purple-300">Zenith</div>
+        <div className="w-px h-32 bg-gradient-to-b from-purple-400 via-orange-400 to-orange-600"></div>
+        <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-orange-500">Horizon</div>
+      </div>
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-none opacity-90">
         <div className="flex items-center gap-4 bg-slate-950/80 px-6 py-2 rounded-full border border-slate-800 backdrop-blur-sm">
-           <LegendItem color="#f97316" label="Core" icon="☀️" />
-           <LegendItem color="#a855f7" label="Concept" icon="🧠" />
-           <LegendItem color="#f43f5e" label="Skill" icon="⚡" />
-           <LegendItem color="#fbbf24" label="AI Tool" icon="🛠️" />
-           <LegendItem color="#22d3ee" label="Infra" icon="🏗️" />
+          <LegendItem color="#f97316" label="Core" icon="☀️" />
+          <LegendItem color="#a855f7" label="Concept" icon="🧠" />
+          <LegendItem color="#f43f5e" label="Skill" icon="⚡" />
+          <LegendItem color="#fbbf24" label="AI Tool" icon="🛠️" />
+          <LegendItem color="#22d3ee" label="Infra" icon="🏗️" />
         </div>
       </div>
       <svg ref={svgRef} width={width} height={height} className="w-full h-full block touch-none" />
@@ -320,7 +320,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeCli
 const LegendItem = ({ color, label, icon }: { color: string, label: string, icon: string }) => (
   <div className="flex items-center gap-2">
     <span className="text-sm">{icon}</span>
-    <span className="text-xs text-slate-300 font-medium" style={{color: color}}>{label}</span>
+    <span className="text-xs text-slate-300 font-medium" style={{ color: color }}>{label}</span>
   </div>
 );
 
