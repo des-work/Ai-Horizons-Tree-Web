@@ -119,6 +119,17 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ node, data, onClose, onNaviga
                     <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">About this Node</h3>
                     <div className="prose prose-invert prose-sm bg-slate-800/30 p-4 rounded-lg border border-slate-800/50">
                         <p className="text-slate-300 leading-relaxed">{node.description}</p>
+                        {node.link && (
+                            <a
+                                href={node.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center mt-3 text-xs text-orange-400 hover:text-orange-300 transition-colors font-medium"
+                            >
+                                Visit Official Platform
+                                <svg className="w-3 h-3 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </a>
+                        )}
                         {node.category === NodeType.INFRASTRUCTURE && (
                             <p className="text-cyan-400/80 text-xs mt-2 italic border-t border-slate-700/50 pt-2">
                                 * This is a foundational tool for the ecosystem, distinct from core AI models.
@@ -189,20 +200,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ node, data, onClose, onNaviga
 
             {/* Footer / Resources */}
             <div className="flex-none p-6 border-t border-slate-800 bg-slate-900/50">
-                <div className="flex justify-between items-center mb-3">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Resources</h3>
-                    {node.link && (
-                        <a
-                            href={node.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-400 px-2 py-1 rounded border border-slate-700 transition-colors flex items-center"
-                        >
-                            Visit Platform
-                            <svg className="w-3 h-3 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                        </a>
-                    )}
-                </div>
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Resources</h3>
                 <ul className="space-y-2">
                     {node.resources && node.resources.length > 0 ? node.resources.map((res, i) => (
                         <li key={i} className="flex items-center text-sm text-amber-400 hover:text-amber-300 transition-colors truncate">
