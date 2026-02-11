@@ -1,7 +1,20 @@
-
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { SkillTreeData, SimulationNode, SimulationLink, NodeType } from '../types';
+import {
+  getNodeColor,
+  getNodeRadius,
+  getNodeStrokeWidth,
+  getNodeIcon,
+  computeNodeLevels,
+  getConnectedElements,
+  getLinkNodeId,
+} from '../utils/graphUtils';
+import { SIMULATION, LAYOUT, ANIMATION, COLORS } from '../constants/theme';
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface GraphVisualizationProps {
   data: SkillTreeData;
@@ -11,108 +24,175 @@ interface GraphVisualizationProps {
   height: number;
 }
 
-const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeClick, selectedNodeId, width, height }) => {
+// ============================================================================
+// LEGEND COMPONENT
+// ============================================================================
+
+interface LegendItemProps {
+  color: string;
+  label: string;
+  icon: string;
+}
+
+const LegendItem: React.FC<LegendItemProps> = ({ color, label, icon }) => (
+  <div className="flex items-center gap-2">
+    <span className="text-sm">{icon}</span>
+    <span className="text-xs text-slate-300 font-medium" style={{ color }}>
+      {label}
+    </span>
+  </div>
+);
+
+const Legend: React.FC = () => {
+  // Use getNodeColor utility for type safety
+  return (
+    <div className="main-page-legend absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-none opacity-90">
+      <div className="flex items-center gap-4 bg-slate-950/80 px-6 py-2 rounded-full border border-slate-800 backdrop-blur-sm">
+        <LegendItem color={getNodeColor(NodeType.CORE)} label="Core" icon={getNodeIcon(NodeType.CORE)} />
+        <LegendItem color={getNodeColor(NodeType.CONCEPT)} label="Concept" icon={getNodeIcon(NodeType.CONCEPT)} />
+        <LegendItem color={getNodeColor(NodeType.SKILL)} label="Skill" icon={getNodeIcon(NodeType.SKILL)} />
+        <LegendItem color={getNodeColor(NodeType.TOOL)} label="AI Tool" icon={getNodeIcon(NodeType.TOOL)} />
+        <LegendItem color={getNodeColor(NodeType.INFRASTRUCTURE)} label="Infra" icon={getNodeIcon(NodeType.INFRASTRUCTURE)} />
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// ORIENTATION HINT COMPONENT
+// ============================================================================
+
+const OrientationHint: React.FC = () => (
+  <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-4 opacity-30 pointer-events-none">
+    <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-purple-300">Zenith</div>
+    <div className="w-px h-32 bg-gradient-to-b from-purple-400 via-orange-400 to-orange-600"></div>
+    <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-orange-500">Horizon</div>
+  </div>
+);
+
+// ============================================================================
+// ZOOM CONTROLS
+// ============================================================================
+
+interface ZoomControlsProps {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onReset: () => void;
+}
+
+const ZoomControls: React.FC<ZoomControlsProps> = ({ onZoomIn, onZoomOut, onReset }) => (
+  <div className="absolute top-4 right-4 z-10 flex flex-col gap-1 rounded-lg bg-slate-950/80 backdrop-blur-sm border border-slate-700/80 p-1 shadow-lg">
+    <button
+      type="button"
+      onClick={onZoomIn}
+      className="p-2 rounded text-slate-300 hover:text-white hover:bg-slate-700/80 transition-colors"
+      title="Zoom in"
+      aria-label="Zoom in"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+      </svg>
+    </button>
+    <button
+      type="button"
+      onClick={onZoomOut}
+      className="p-2 rounded text-slate-300 hover:text-white hover:bg-slate-700/80 transition-colors"
+      title="Zoom out"
+      aria-label="Zoom out"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
+      </svg>
+    </button>
+    <div className="h-px bg-slate-600/80 my-0.5" />
+    <button
+      type="button"
+      onClick={onReset}
+      className="p-2 rounded text-slate-300 hover:text-white hover:bg-slate-700/80 transition-colors"
+      title="Reset view (also: double-click)"
+      aria-label="Reset view"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4a8 8 0 108 8" />
+      </svg>
+    </button>
+  </div>
+);
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+const GraphVisualization: React.FC<GraphVisualizationProps> = ({
+  data,
+  onNodeClick,
+  selectedNodeId,
+  width,
+  height,
+}) => {
   const svgRef = useRef<SVGSVGElement>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
-  // Sunrise Palette
-  const getColor = (category: string) => {
-    switch (category) {
-      case NodeType.CORE: return '#f97316'; // Orange 500 (The Horizon Sun)
-      case NodeType.TOOL: return '#fbbf24'; // Amber 400 (Light/Rays)
-      case NodeType.INFRASTRUCTURE: return '#22d3ee'; // Cyan 400 (Cool/Foundation/Water)
-      case NodeType.CONCEPT: return '#a855f7'; // Purple 500 (The Sky/Atmosphere)
-      case NodeType.SKILL: return '#f43f5e'; // Rose 500 (The Dawn)
-      default: return '#94a3b8'; // Slate 400
+  // Zoom control handlers
+  const handleZoomIn = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current).transition().duration(200).call(zoomRef.current.scaleBy, 1.4);
+    }
+  };
+  const handleZoomOut = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current).transition().duration(200).call(zoomRef.current.scaleBy, 0.7);
+    }
+  };
+  const handleResetView = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current).transition().duration(400).call(zoomRef.current.transform, d3.zoomIdentity);
     }
   };
 
-  const getRadius = (category: string) => {
-    switch (category) {
-      case NodeType.CORE: return 35; // Larger roots
-      case NodeType.CONCEPT: return 25;
-      case NodeType.SKILL: return 20;
-      case NodeType.INFRASTRUCTURE: return 22;
-      default: return 18;
-    }
-  };
-
-  // Helper to compute depth (levels) for Bottom-Up layout
-  const computeLevels = (nodes: SimulationNode[], links: SimulationLink[]) => {
-    const adjacency: Record<string, string[]> = {};
-    links.forEach(l => {
-      const s = typeof l.source === 'object' ? (l.source as any).id : l.source;
-      const t = typeof l.target === 'object' ? (l.target as any).id : l.target;
-      if (!adjacency[s]) adjacency[s] = [];
-      adjacency[s].push(t);
-    });
-
-    const levels: Record<string, number> = {};
-    const queue: { id: string, lvl: number }[] = [];
-
-    // Initialize CORE nodes at level 0
-    nodes.forEach(n => {
-      if (n.category === NodeType.CORE) {
-        levels[n.id] = 0;
-        queue.push({ id: n.id, lvl: 0 });
-      }
-    });
-
-    // BFS to assign levels moving UP
-    while (queue.length > 0) {
-      const { id, lvl } = queue.shift()!;
-      const children = adjacency[id] || [];
-      children.forEach(childId => {
-        if (levels[childId] === undefined) {
-          levels[childId] = lvl + 1;
-          queue.push({ id: childId, lvl: lvl + 1 });
-        }
-      });
-    }
-
-    let maxLevel = 0;
-    nodes.forEach(n => {
-      const lvl = levels[n.id] !== undefined ? levels[n.id] : 1;
-      (n as any).level = lvl;
-      if (lvl > maxLevel) maxLevel = lvl;
-    });
-
-    return maxLevel;
-  };
-
-  // Main D3 Effect
+  // Main D3 Effect - creates and manages the force simulation
   useEffect(() => {
     if (!svgRef.current || !data.nodes.length) return;
 
     const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
+    svg.selectAll('*').remove();
 
+    // Create deep copies to avoid mutating original data
     const nodes: SimulationNode[] = data.nodes.map(d => ({ ...d }));
     const links: SimulationLink[] = data.links.map(d => ({ ...d }));
 
-    const maxLevel = computeLevels(nodes, links);
+    const maxLevel = computeNodeLevels(nodes, links);
 
     // --- SETUP LAYOUT ---
-    const g = svg.append("g").attr("class", "graph-container");
+    const g = svg.append('g').attr('class', 'graph-container');
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 4])
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
+    const zoom = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.15, 5])
+      .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        g.attr('transform', event.transform.toString());
       });
     svg.call(zoom);
+    zoomRef.current = zoom;
 
-    // Filter Core Nodes
+    // Double-click on background to reset zoom
+    svg.on('dblclick.zoom', null); // remove default zoom-in on dblclick
+    svg.on('dblclick', () => {
+      svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+    });
+
+    // Filter and sort Core Nodes
     const coreNodes = nodes.filter(n => n.category === NodeType.CORE);
     coreNodes.sort((a, b) => a.label.localeCompare(b.label));
     const coreCount = coreNodes.length;
 
-    // --- POSITIONS ---
-    const bottomY = height - 100;
-    const topY = 100;
+    // --- COMPUTE POSITIONS ---
+    const bottomY = height - LAYOUT.verticalPadding;
+    const topY = LAYOUT.verticalPadding;
     const availableH = bottomY - topY;
     const spacingX = width / (coreCount + 1);
 
-    // Fix Cores
+    // Fix Core nodes at the bottom (the "Horizon")
     coreNodes.forEach((node, i) => {
       node.fx = spacingX * (i + 1);
       node.fy = bottomY;
@@ -120,208 +200,242 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({ data, onNodeCli
       node.y = node.fy;
     });
 
-    // Init others
+    // Initialize other nodes based on their level
     nodes.forEach(node => {
       if (node.category !== NodeType.CORE) {
-        const level = (node as any).level || 1;
+        const level = node.level ?? 1;
         const ratio = level / Math.max(maxLevel, 1);
-        node.y = bottomY - (ratio * availableH);
+        node.y = bottomY - ratio * availableH;
         node.x = width / 2 + (Math.random() - 0.5) * 300;
       }
     });
 
     // --- FORCE SIMULATION ---
-    const simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links)
-        .id((d: any) => d.id)
-        .distance(180) // Increased from 120
-        .strength(0.4)
+    const simulation = d3
+      .forceSimulation(nodes)
+      .force(
+        'link',
+        d3
+          .forceLink<SimulationNode, SimulationLink>(links)
+          .id(d => d.id)
+          .distance(SIMULATION.link.distance)
+          .strength(SIMULATION.link.strength)
       )
-      .force("charge", d3.forceManyBody().strength(-800)) // Increased from -400
-      .force("collide", d3.forceCollide().radius((d: any) => getRadius(d.category) + 30).iterations(2)) // Increased padding
-      .force("y", d3.forceY().y((d: any) => {
-        const level = (d as any).level || 0;
-        const ratio = level / Math.max(maxLevel, 1);
-        return bottomY - (ratio * availableH);
-      }).strength(1.2)
+      .force('charge', d3.forceManyBody().strength(SIMULATION.charge.strength))
+      .force(
+        'collide',
+        d3
+          .forceCollide<SimulationNode>()
+          .radius(d => getNodeRadius(d.category) + SIMULATION.collide.padding)
+          .iterations(SIMULATION.collide.iterations)
       )
-      .force("x", d3.forceX(width / 2).strength(0.05));
+      .force(
+        'y',
+        d3
+          .forceY<SimulationNode>()
+          .y(d => {
+            const level = d.level ?? 0;
+            const ratio = level / Math.max(maxLevel, 1);
+            return bottomY - ratio * availableH;
+          })
+          .strength(SIMULATION.yForce.strength)
+      )
+      .force('x', d3.forceX(width / 2).strength(SIMULATION.xForce.strength));
 
     // --- DRAWING ---
 
-    // Arrow Markers
-    svg.append("defs").selectAll("marker")
-      .data(["arrow"])
-      .enter().append("marker")
-      .attr("id", "arrow")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 28)
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-      .attr("d", "M0,-5L10,0L0,5")
-      .attr("fill", "#64748b");
+    // Defs: arrow markers + node glow filter
+    const defs = svg.append('defs');
+    defs
+      .append('filter')
+      .attr('id', 'node-glow')
+      .attr('x', '-80%')
+      .attr('y', '-80%')
+      .attr('width', '260%')
+      .attr('height', '260%')
+      .append('feGaussianBlur')
+      .attr('in', 'SourceGraphic')
+      .attr('stdDeviation', '2.5')
+      .attr('result', 'blur');
+    defs
+      .select('filter#node-glow')
+      .append('feMerge')
+      .selectAll('feMergeNode')
+      .data(['blur', 'SourceGraphic'])
+      .enter()
+      .append('feMergeNode')
+      .attr('in', d => d);
+    defs
+      .selectAll('marker')
+      .data(['arrow'])
+      .enter()
+      .append('marker')
+      .attr('id', 'arrow')
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', LAYOUT.arrowMarker.refX)
+      .attr('refY', 0)
+      .attr('markerWidth', LAYOUT.arrowMarker.markerWidth)
+      .attr('markerHeight', LAYOUT.arrowMarker.markerHeight)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('fill', COLORS.link.default);
 
-    const link = g.append("g")
-      .attr("class", "links")
-      .selectAll("path")
+    // Draw Links
+    const link = g
+      .append('g')
+      .attr('class', 'links')
+      .selectAll('path')
       .data(links)
-      .join("path")
-      .attr("class", "link")
-      .attr("stroke", "#64748b")
-      .attr("stroke-width", 2)
-      .attr("fill", "none")
-      .attr("marker-end", "url(#arrow)");
+      .join('path')
+      .attr('class', 'link')
+      .attr('stroke', COLORS.link.default)
+      .attr('stroke-width', 2)
+      .attr('fill', 'none')
+      .attr('marker-end', 'url(#arrow)');
 
-    const nodeGroup = g.append("g")
-      .attr("class", "nodes")
-      .selectAll(".node")
+    // Draw Nodes
+    const nodeGroup = g
+      .append('g')
+      .attr('class', 'nodes')
+      .selectAll<SVGGElement, SimulationNode>('.node')
       .data(nodes)
-      .join("g")
-      .attr("class", "node")
-      .attr("cursor", "pointer")
-      .attr("id", (d) => `node-${d.id}`)
-      .call(d3.drag<any, any>()
-        .on("start", dragstarted)
-        .on("drag", dragged)
-        .on("end", dragended));
+      .join('g')
+      .attr('class', 'node')
+      .attr('cursor', 'pointer')
+      .attr('id', d => `node-${d.id}`)
+      .call(
+        d3
+          .drag<SVGGElement, SimulationNode>()
+          .on('start', dragstarted)
+          .on('drag', dragged)
+          .on('end', dragended)
+      );
 
-    nodeGroup.append("circle")
-      .attr("r", (d) => getRadius(d.category))
-      .attr("fill", "#0f172a")
-      .attr("stroke", (d) => getColor(d.category))
-      .attr("stroke-width", (d) => d.category === NodeType.CORE ? 4 : 2)
-      .on("click", (event, d) => {
+    // Node circles (with glow filter)
+    nodeGroup
+      .append('circle')
+      .attr('r', d => getNodeRadius(d.category))
+      .attr('fill', COLORS.background.primary)
+      .attr('stroke', d => getNodeColor(d.category))
+      .attr('stroke-width', d => getNodeStrokeWidth(d.category))
+      .attr('filter', 'url(#node-glow)')
+      .on('click', (event: MouseEvent, d: SimulationNode) => {
         event.stopPropagation();
         onNodeClick(d);
       });
 
-    nodeGroup.append("text")
-      .text(d => {
-        if (d.category === NodeType.TOOL) return '🛠️';
-        if (d.category === NodeType.INFRASTRUCTURE) return '🏗️';
-        if (d.category === NodeType.SKILL) return '⚡';
-        if (d.category === NodeType.CONCEPT) return '🧠';
-        if (d.category === NodeType.CORE) return '☀️';
-        return '';
-      })
-      .attr("dy", 5)
-      .attr("text-anchor", "middle")
-      .attr("font-size", (d) => d.category === NodeType.CORE ? "18px" : "14px")
-      .attr("pointer-events", "none");
+    // Node icons (emoji)
+    nodeGroup
+      .append('text')
+      .text(d => getNodeIcon(d.category))
+      .attr('dy', 5)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', d => (d.category === NodeType.CORE ? '18px' : '14px'))
+      .attr('pointer-events', 'none');
 
-    nodeGroup.append("text")
+    // Node labels
+    nodeGroup
+      .append('text')
       .text(d => d.label)
-      .attr("x", 0)
-      .attr("y", (d) => getRadius(d.category) + 18)
-      .attr("text-anchor", "middle")
-      .attr("fill", "#e2e8f0")
-      .attr("font-size", "12px")
-      .attr("font-weight", "600")
-      .attr("pointer-events", "none")
-      .style("text-shadow", "0 2px 4px rgba(0,0,0,1)");
+      .attr('x', 0)
+      .attr('y', d => getNodeRadius(d.category) + 18)
+      .attr('text-anchor', 'middle')
+      .attr('fill', COLORS.text.primary)
+      .attr('font-size', '12px')
+      .attr('font-weight', '600')
+      .attr('pointer-events', 'none')
+      .style('text-shadow', '0 2px 4px rgba(0,0,0,1)');
 
-    simulation.on("tick", () => {
-      link.attr("d", (d: any) => `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`);
-      nodeGroup.attr("transform", (d) => `translate(${d.x},${d.y})`);
+    // Tick handler - updates positions on each simulation tick
+    simulation.on('tick', () => {
+      link.attr('d', d => {
+        const source = d.source as SimulationNode;
+        const target = d.target as SimulationNode;
+        return `M${source.x},${source.y} L${target.x},${target.y}`;
+      });
+      nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
-    function dragstarted(event: any, d: any) {
+    // Drag handlers
+    function dragstarted(event: d3.D3DragEvent<SVGGElement, SimulationNode, SimulationNode>, d: SimulationNode) {
       if (!event.active) simulation.alphaTarget(0.3).restart();
       d.fx = d.x;
       d.fy = d.y;
     }
 
-    function dragged(event: any, d: any) {
+    function dragged(event: d3.D3DragEvent<SVGGElement, SimulationNode, SimulationNode>, d: SimulationNode) {
       d.fx = event.x;
       d.fy = event.y;
     }
 
-    function dragended(event: any, d: any) {
+    function dragended(event: d3.D3DragEvent<SVGGElement, SimulationNode, SimulationNode>, d: SimulationNode) {
       if (!event.active) simulation.alphaTarget(0);
+      // Keep core nodes fixed, release others
       if (d.category !== NodeType.CORE) {
         d.fx = null;
         d.fy = null;
       }
     }
 
-    return () => simulation.stop();
-  }, [data, width, height]);
+    // Cleanup on unmount
+    return () => {
+      simulation.stop();
+    };
+  }, [data, width, height, onNodeClick]);
 
-  // --- SELECTION HIGHLIGHTING EFFECT ---
+  // Selection highlighting effect
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
 
     if (!selectedNodeId) {
-      // Reset state
-      svg.selectAll(".node, .link").transition().duration(300).style("opacity", 1);
+      // Reset all elements to full opacity
+      svg
+        .selectAll('.node, .link')
+        .transition()
+        .duration(ANIMATION.selectionTransition)
+        .style('opacity', 1);
       return;
     }
 
-    // Identify connected nodes and links
-    const activeNodeIds = new Set<string>();
-    const activeLinkIndices = new Set<number>();
+    // Get connected elements
+    const { nodeIds, linkIndices } = getConnectedElements(selectedNodeId, data.links);
 
-    activeNodeIds.add(selectedNodeId);
+    // Dim non-connected nodes
+    svg
+      .selectAll<SVGGElement, SimulationNode>('.node')
+      .transition()
+      .duration(ANIMATION.selectionTransition)
+      .style('opacity', d => (nodeIds.has(d.id) ? 1 : 0.1));
 
-    // D3 binds data to elements. We can iterate the data to find connections.
-    // Note: After simulation, links have source/target as Node objects
-    data.links.forEach((l, i) => {
-      const sId = typeof l.source === 'object' ? (l.source as any).id : l.source;
-      const tId = typeof l.target === 'object' ? (l.target as any).id : l.target;
-
-      // Highlight if connected to selection
-      if (sId === selectedNodeId || tId === selectedNodeId) {
-        activeNodeIds.add(sId);
-        activeNodeIds.add(tId);
-        activeLinkIndices.add(i);
-      }
-    });
-
-    // Apply styles
-    svg.selectAll(".node")
-      .transition().duration(300)
-      .style("opacity", (d: any) => activeNodeIds.has(d.id) ? 1 : 0.1);
-
-    svg.selectAll(".link")
-      .transition().duration(300)
-      .style("opacity", (d: any, i) => activeLinkIndices.has(i) ? 1 : 0.05)
-      .attr("stroke", (d: any, i) => activeLinkIndices.has(i) ? "#fbbf24" : "#64748b") // Highlight color (Amber)
-      .attr("stroke-width", (d: any, i) => activeLinkIndices.has(i) ? 3 : 2);
-
-  }, [selectedNodeId, data]); // Run when selection changes
+    // Highlight connected links
+    svg
+      .selectAll<SVGPathElement, SimulationLink>('.link')
+      .transition()
+      .duration(ANIMATION.selectionTransition)
+      .style('opacity', (_d, i) => (linkIndices.has(i) ? 1 : 0.05))
+      .attr('stroke', (_d, i) => (linkIndices.has(i) ? COLORS.link.highlight : COLORS.link.default))
+      .attr('stroke-width', (_d, i) => (linkIndices.has(i) ? 3 : 2));
+  }, [selectedNodeId, data.links]);
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-slate-900">
-      {/* Orientation Hint */}
-      <div className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-4 opacity-30 pointer-events-none">
-        <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-purple-300">Zenith</div>
-        <div className="w-px h-32 bg-gradient-to-b from-purple-400 via-orange-400 to-orange-600"></div>
-        <div className="text-xs font-mono uppercase rotate-90 tracking-widest text-orange-500">Horizon</div>
-      </div>
-
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-none opacity-90">
-        <div className="flex items-center gap-4 bg-slate-950/80 px-6 py-2 rounded-full border border-slate-800 backdrop-blur-sm">
-          <LegendItem color="#f97316" label="Core" icon="☀️" />
-          <LegendItem color="#a855f7" label="Concept" icon="🧠" />
-          <LegendItem color="#f43f5e" label="Skill" icon="⚡" />
-          <LegendItem color="#fbbf24" label="AI Tool" icon="🛠️" />
-          <LegendItem color="#22d3ee" label="Infra" icon="🏗️" />
-        </div>
-      </div>
-      <svg ref={svgRef} width={width} height={height} className="w-full h-full block touch-none" />
+    <div className="relative w-full h-full overflow-hidden bg-transparent">
+      <OrientationHint />
+      <Legend />
+      <ZoomControls
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onReset={handleResetView}
+      />
+      <svg
+        ref={svgRef}
+        width={width}
+        height={height}
+        className="w-full h-full block touch-none cursor-grab active:cursor-grabbing"
+      />
     </div>
   );
 };
-
-const LegendItem = ({ color, label, icon }: { color: string, label: string, icon: string }) => (
-  <div className="flex items-center gap-2">
-    <span className="text-sm">{icon}</span>
-    <span className="text-xs text-slate-300 font-medium" style={{ color: color }}>{label}</span>
-  </div>
-);
 
 export default GraphVisualization;

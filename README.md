@@ -39,11 +39,13 @@ Follow these steps to get the project running on your local machine.
     ```
 
 2.  **Configure Environment:**
-    Create a `.env.local` file in the root directory and add your Gemini API key:
+    Create a `.env` file in the root directory and add your Gemini API key:
     ```env
-    VITE_GEMINI_API_KEY=your_api_key_here
+    GEMINI_API_KEY=your_api_key_here
     ```
-    *(Note: Ensure the variable name matches what is used in `services/geminiService.ts`. If the code uses a different variable name like `GEMINI_API_KEY`, please adjust accordingly. Standard Vite apps usually require `VITE_` prefix for client-side exposure unless configured otherwise.)*
+    Get your free API key from: https://aistudio.google.com/app/apikey
+    
+    ⚠️ **IMPORTANT**: Never commit your `.env` file to Git. Keep your API key private!
 
 3.  **Run the development server:**
     ```bash

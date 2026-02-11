@@ -160,43 +160,67 @@ export const FALLBACK_DATA: SkillTreeData = {
   ]
 };
 
-export const generateSkillTree = async (topic: string): Promise<SkillTreeData> => {
+export const generateSkillTree = async (topic: string, variation: number = 0): Promise<SkillTreeData> => {
   try {
     const prompt = `
-      CONTEXT: The user is interested in: "${topic}". 
-      This input could be a CAREER (e.g., Nursing, Law), a MAJOR (e.g., Biology), a PROJECT idea, or a technical interest.
+      CONTEXT: The user wants to learn about: "${topic}". 
+      This could be a CAREER FIELD (e.g., Healthcare, Law, Marketing), an AREA OF STUDY (e.g., Biology, Data Science), or a PROJECT TYPE (e.g., Building a Mobile App, Starting a Podcast).
       
-      TASK: Create a hierarchical "Skill Tree" visualization that explains how AI tools and concepts apply specifically to "${topic}".
+      TASK: Create a practical, project-focused "AI Tool Map" showing how modern AI tools and skills can be used for REAL PROJECTS in "${topic}".
       
-      CRITICAL STRUCTURE RULES (Strict 5-Level Hierarchy):
-      1. **LEVEL 0 (ROOT)**: Start with exactly 1 CORE node: "Domain Knowledge". This represents the user's specific field (${topic}).
-      2. **LEVEL 1 (INFRASTRUCTURE)**: Must include "Automation" (e.g., n8n), "Containerization" (e.g., Docker), "Version Control" (e.g., GitHub). These flow FROM Domain Knowledge.
-      3. **LEVEL 2 (SKILL)**: Must include "Vibe Coding". This flows FROM Level 1 nodes.
-      4. **LEVEL 3 (TOOLS)**: Must include "Cursor", "ChatGPT Codex", "Antigravity", "Ollama". These flow FROM Vibe Coding.
-      5. **LEVEL 4 (ADVANCED)**: Must include "Google Gemini", "ChatGPT", "Model Selection".
-         - "Google Gemini" must flow FROM "Antigravity".
-         - "ChatGPT" must flow FROM "ChatGPT Codex".
-         - "Model Selection" must flow FROM "Ollama".
+      VARIATION: This is variation #${variation}. Show DIFFERENT tool combinations and approaches than previous variations. Be creative with tool selection while staying practical.
       
-      CLASSIFICATION RULES:
-      - **SKILL**: Vibe Coding.
-      - **TOOL**: Google Gemini, ChatGPT, Model Selection.
-      - **CONCEPT**: Cursor, ChatGPT Codex, Antigravity, Ollama, Domain Knowledge.
+      STRUCTURE REQUIREMENTS:
+      1. **CORE Node (1)**: The domain/field itself (${topic})
+      2. **INFRASTRUCTURE (2-3 nodes)**: Foundational tools/platforms (GitHub, Cloud platforms, Automation tools)
+      3. **SKILLS (2-4 nodes)**: Key skills like "Prompt Engineering", "API Integration", "Data Analysis", "Content Creation"
+      4. **TOOLS (4-6 nodes)**: Specific AI tools applicable to ${topic}. Mix it up! Examples:
+         - For creative work: Midjourney, RunwayML, ElevenLabs, Claude
+         - For data/analysis: ChatGPT, Claude, Perplexity, Google Gemini
+         - For coding: Cursor, GitHub Copilot, Replit, v0.dev
+         - For automation: Make.com, Zapier, n8n
+      5. **ADVANCED (2-3 nodes)**: Cutting-edge applications or integrations
       
-      CONTENT REQUIREMENTS:
-      - **ACCURACY IS PARAMOUNT**. Descriptions must be factually correct.
-      - **SIMPLE LANGUAGE**: Explain concepts as if to a non-technical friend. Use analogies. Avoid jargon where possible.
-      - **LINKS**: You MUST provide a valid 'link' field for every node pointing to the official website or a high-quality resource.
-      - **TAGS**: Provide 2-3 relevant tags.
+      CRITICAL: FOCUS ON PRACTICAL APPLICATIONS
+      - Each node description MUST include a CONCRETE EXAMPLE of how it's used in a real ${topic} project
+      - Explain "HOW TO USE IT" not just "WHAT IT IS"
+      - Use specific scenarios: "Use [Tool] to [specific action] when [specific situation]"
+      
+      EXAMPLE FORMAT:
+      Instead of: "ChatGPT is an AI chatbot"
+      Write: "Use ChatGPT to draft patient education materials, generate billing summaries, or brainstorm treatment approaches when working on healthcare projects"
+      
+      CLASSIFICATION:
+      - CORE: The field itself
+      - INFRASTRUCTURE: Platforms, version control, automation frameworks
+      - SKILL: Human capabilities enhanced by AI (prompting, integration, analysis)
+      - TOOL: Specific AI products/services (ChatGPT, Midjourney, Cursor, etc.)
+      - CONCEPT: Methodologies or advanced techniques
+      
+      REQUIREMENTS:
+      - Vary the tools shown in each variation to show different approaches
+      - Keep descriptions actionable and project-focused
+      - Include valid links to official tool websites
+      - Use 2-3 relevant tags per node
+      - Ensure relationships describe HOW tools connect (e.g., "enables", "required for", "enhances")
       
       JSON FORMAT:
-      Return ONLY a raw JSON object with this structure:
       {
+        "projectSummary": "A 2-3 sentence example project using these tools in ${topic}. Be specific and practical.",
         "nodes": [
-          { "id": "string", "label": "string", "category": "NodeType", "description": "string", "difficulty": "string", "tags": ["string"], "link": "https://..." }
+          { 
+            "id": "unique_id", 
+            "label": "Tool/Skill Name", 
+            "category": "CORE|TOOL|INFRASTRUCTURE|CONCEPT|SKILL",
+            "description": "Practical HOW-TO description with specific ${topic} use case",
+            "difficulty": "Beginner|Intermediate|Advanced",
+            "tags": ["tag1", "tag2"],
+            "link": "https://official-website.com",
+            "resources": ["https://tutorial-or-guide.com"] // optional
+          }
         ],
         "links": [
-          { "source": "id", "target": "id", "relationship": "string" }
+          { "source": "prerequisite_id", "target": "dependent_id", "relationship": "enables|required for|enhances" }
         ]
       }
     `;
@@ -214,6 +238,10 @@ export const generateSkillTree = async (topic: string): Promise<SkillTreeData> =
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            projectSummary: { 
+              type: Type.STRING,
+              description: "A concrete project example using these tools"
+            },
             nodes: {
               type: Type.ARRAY,
               items: {
@@ -244,7 +272,7 @@ export const generateSkillTree = async (topic: string): Promise<SkillTreeData> =
               }
             }
           },
-          required: ["nodes", "links"]
+          required: ["projectSummary", "nodes", "links"]
         }
       }
     });
