@@ -1,5 +1,5 @@
 /**
- * Theme constants for AI Horizons
+ * Theme constants for AI Horizon
  * Centralized color palette and styling values based on the "Sunrise" theme
  */
 

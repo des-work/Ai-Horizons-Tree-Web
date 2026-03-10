@@ -190,3 +190,32 @@ export function getConnectedElements(
   return { nodeIds, linkIndices };
 }
 
+/**
+ * Get all nodes and links on paths between stack nodes (full lattice path top-to-bottom).
+ * Expands to include links between any two highlighted nodes so no intermediate lattice link is missed.
+ */
+export function getFullPathBetweenStackNodes(
+  stackNodeIds: Set<string>,
+  links: SkillLink[]
+): { nodeIds: Set<string>; linkIndices: Set<number> } {
+  const nodeIds = new Set<string>(stackNodeIds);
+  const linkIndices = new Set<number>();
+
+  // Add all connections for each stack node
+  stackNodeIds.forEach((id) => {
+    const { nodeIds: adj, linkIndices: adjLinks } = getConnectedElements(id, links);
+    adj.forEach((n) => nodeIds.add(n));
+    adjLinks.forEach((i) => linkIndices.add(i));
+  });
+
+  // Add any link whose BOTH endpoints are in nodeIds (fills in intermediate links)
+  links.forEach((link, index) => {
+    const sourceId = getLinkNodeId(link.source as SimulationNode | string);
+    const targetId = getLinkNodeId(link.target as SimulationNode | string);
+    if (nodeIds.has(sourceId) && nodeIds.has(targetId)) {
+      linkIndices.add(index);
+    }
+  });
+
+  return { nodeIds, linkIndices };
+}

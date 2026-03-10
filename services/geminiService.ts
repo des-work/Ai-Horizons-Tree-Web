@@ -1,21 +1,40 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { SkillTreeData, NodeType } from "../types";
 
+const OLLAMA_BASE_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 
+export interface OllamaModel {
+  name: string;
+  size: number;
+  parameterSize: string;
+  family: string;
+}
 
-// Initialize lazily to prevent crashes if API key is missing at startup
-const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.warn("Gemini API Key is missing. Using fallback data.");
-    return null;
+export async function fetchAvailableModels(): Promise<OllamaModel[]> {
+  try {
+    const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const models: Array<{
+      name: string;
+      size: number;
+      details?: { parameter_size?: string; family?: string };
+    }> = data.models || [];
+
+    return models.map(m => ({
+      name: m.name,
+      size: m.size,
+      parameterSize: m.details?.parameter_size || '',
+      family: m.details?.family || '',
+    }));
+  } catch {
+    return [];
   }
-  return new GoogleGenAI({ apiKey });
-};
+}
 
 // Default fallback data with 3 distinct CORE roots and bottom-up flow
 export const FALLBACK_DATA: SkillTreeData = {
+  projectSummary: "Build a complete AI-powered workflow by combining your domain expertise with modern tools. Start with foundational infrastructure like Version Control and Automation, learn Vibe Coding to direct AI assistants, then leverage tools like Cursor and Ollama to generate, test, and deploy solutions — all while picking the right model for each task using Model Selection.",
   nodes: [
     // --- LEVEL 0: ROOT (CORE) ---
     {
@@ -65,7 +84,7 @@ export const FALLBACK_DATA: SkillTreeData = {
       description: "Vibe Coding is a modern way of building software where you focus on the 'flow' and the outcome rather than getting stuck on syntax. It's about using AI to handle the heavy lifting of writing code, while you direct the logic and creativity, like a conductor leading an orchestra.",
       difficulty: "Intermediate",
       tags: ["Coding", "Flow"],
-      link: "https://twitter.com/karpathy/status/1754213778556539356" // Karpathy's tweet on the concept
+      link: "https://twitter.com/karpathy/status/1754213778556539356"
     },
 
     // --- LEVEL 3: TOOLS & CONCEPTS ---
@@ -94,7 +113,7 @@ export const FALLBACK_DATA: SkillTreeData = {
       description: "Antigravity is an experimental design paradigm that aims to make software feel weightless and fluid. It uses physics-based animations and intuitive interactions to create interfaces that feel more like natural extensions of your mind than rigid computer programs.",
       difficulty: "Advanced",
       tags: ["UI/UX", "Experimental"],
-      link: "https://www.antigravity.com/" // Placeholder/Concept link
+      link: "https://www.antigravity.com/"
     },
     {
       id: "t4",
@@ -153,138 +172,101 @@ export const FALLBACK_DATA: SkillTreeData = {
     { source: "sk1", target: "t4", relationship: "deploys" },
 
     // Level 3 -> Level 4
-    { source: "con1", target: "adv1", relationship: "visualizes" }, // Antigravity -> Gemini
-    { source: "t3", target: "adv2", relationship: "powers" }, // Codex -> ChatGPT
-    { source: "t4", target: "sk2", relationship: "requires" }, // Ollama -> Model Selection
-    { source: "t2", target: "adv2", relationship: "integrates" } // Cursor -> ChatGPT (Optional, keeping for structure)
+    { source: "con1", target: "adv1", relationship: "visualizes" },
+    { source: "t3", target: "adv2", relationship: "powers" },
+    { source: "t4", target: "sk2", relationship: "requires" },
+    { source: "t2", target: "adv2", relationship: "integrates" },
+    { source: "t2", target: "sk2", relationship: "leverages" }
   ]
 };
 
-export const generateSkillTree = async (topic: string, variation: number = 0): Promise<SkillTreeData> => {
+export const generateSkillTree = async (topic: string, variation: number = 0, selectedModel?: string): Promise<SkillTreeData> => {
   try {
-    const prompt = `
-      CONTEXT: The user wants to learn about: "${topic}". 
-      This could be a CAREER FIELD (e.g., Healthcare, Law, Marketing), an AREA OF STUDY (e.g., Biology, Data Science), or a PROJECT TYPE (e.g., Building a Mobile App, Starting a Podcast).
-      
-      TASK: Create a practical, project-focused "AI Tool Map" showing how modern AI tools and skills can be used for REAL PROJECTS in "${topic}".
-      
-      VARIATION: This is variation #${variation}. Show DIFFERENT tool combinations and approaches than previous variations. Be creative with tool selection while staying practical.
-      
-      STRUCTURE REQUIREMENTS:
-      1. **CORE Node (1)**: The domain/field itself (${topic})
-      2. **INFRASTRUCTURE (2-3 nodes)**: Foundational tools/platforms (GitHub, Cloud platforms, Automation tools)
-      3. **SKILLS (2-4 nodes)**: Key skills like "Prompt Engineering", "API Integration", "Data Analysis", "Content Creation"
-      4. **TOOLS (4-6 nodes)**: Specific AI tools applicable to ${topic}. Mix it up! Examples:
-         - For creative work: Midjourney, RunwayML, ElevenLabs, Claude
-         - For data/analysis: ChatGPT, Claude, Perplexity, Google Gemini
-         - For coding: Cursor, GitHub Copilot, Replit, v0.dev
-         - For automation: Make.com, Zapier, n8n
-      5. **ADVANCED (2-3 nodes)**: Cutting-edge applications or integrations
-      
-      CRITICAL: FOCUS ON PRACTICAL APPLICATIONS
-      - Each node description MUST include a CONCRETE EXAMPLE of how it's used in a real ${topic} project
-      - Explain "HOW TO USE IT" not just "WHAT IT IS"
-      - Use specific scenarios: "Use [Tool] to [specific action] when [specific situation]"
-      
-      EXAMPLE FORMAT:
-      Instead of: "ChatGPT is an AI chatbot"
-      Write: "Use ChatGPT to draft patient education materials, generate billing summaries, or brainstorm treatment approaches when working on healthcare projects"
-      
-      CLASSIFICATION:
-      - CORE: The field itself
-      - INFRASTRUCTURE: Platforms, version control, automation frameworks
-      - SKILL: Human capabilities enhanced by AI (prompting, integration, analysis)
-      - TOOL: Specific AI products/services (ChatGPT, Midjourney, Cursor, etc.)
-      - CONCEPT: Methodologies or advanced techniques
-      
-      REQUIREMENTS:
-      - Vary the tools shown in each variation to show different approaches
-      - Keep descriptions actionable and project-focused
-      - Include valid links to official tool websites
-      - Use 2-3 relevant tags per node
-      - Ensure relationships describe HOW tools connect (e.g., "enables", "required for", "enhances")
-      
-      JSON FORMAT:
-      {
-        "projectSummary": "A 2-3 sentence example project using these tools in ${topic}. Be specific and practical.",
-        "nodes": [
-          { 
-            "id": "unique_id", 
-            "label": "Tool/Skill Name", 
-            "category": "CORE|TOOL|INFRASTRUCTURE|CONCEPT|SKILL",
-            "description": "Practical HOW-TO description with specific ${topic} use case",
-            "difficulty": "Beginner|Intermediate|Advanced",
-            "tags": ["tag1", "tag2"],
-            "link": "https://official-website.com",
-            "resources": ["https://tutorial-or-guide.com"] // optional
-          }
-        ],
-        "links": [
-          { "source": "prerequisite_id", "target": "dependent_id", "relationship": "enables|required for|enhances" }
-        ]
-      }
-    `;
-
-    const ai = getAiClient();
-    if (!ai) {
+    let model = selectedModel;
+    if (!model) {
+      const models = await fetchAvailableModels();
+      model = models[0]?.name;
+    }
+    if (!model) {
+      console.warn("Ollama not reachable or no models installed. Using fallback data.");
       return FALLBACK_DATA;
     }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            projectSummary: { 
-              type: Type.STRING,
-              description: "A concrete project example using these tools"
-            },
-            nodes: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  label: { type: Type.STRING },
-                  category: { type: Type.STRING, enum: ["CORE", "TOOL", "INFRASTRUCTURE", "CONCEPT", "SKILL"] },
-                  description: { type: Type.STRING },
-                  difficulty: { type: Type.STRING, enum: ["Beginner", "Intermediate", "Advanced"] },
-                  tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  link: { type: Type.STRING },
-                  resources: { type: Type.ARRAY, items: { type: Type.STRING } }
-                },
-                required: ["id", "label", "category", "description", "difficulty", "tags"]
-              }
-            },
-            links: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  source: { type: Type.STRING, description: "ID of the lower/prerequisite node" },
-                  target: { type: Type.STRING, description: "ID of the higher/advanced node" },
-                  relationship: { type: Type.STRING }
-                },
-                required: ["source", "target", "relationship"]
-              }
-            }
+    const prompt = `You are a JSON generator. Respond ONLY with valid JSON, no markdown, no explanation.
+
+Create a practical "AI Tool Map" for the topic: "${topic}".
+This is variation #${variation} — use DIFFERENT tool combinations than previous variations.
+
+STRUCTURE:
+1. CORE (1 node): The domain "${topic}" itself
+2. INFRASTRUCTURE (2-3 nodes): Foundational tools (GitHub, Docker, n8n, etc.)
+3. SKILL (2-4 nodes): Key skills like Prompt Engineering, API Integration, Data Analysis
+4. TOOL (4-6 nodes): Specific AI tools for ${topic} (ChatGPT, Cursor, Midjourney, Claude, etc.)
+5. CONCEPT (1-2 nodes): Methodologies or advanced techniques
+6. ADVANCED (2-3 nodes): Cutting-edge applications
+
+Each node description MUST include a CONCRETE EXAMPLE of how it's used in ${topic}.
+
+Links flow from lower/prerequisite nodes (source) to higher/dependent nodes (target).
+
+Return this exact JSON structure:
+{
+  "projectSummary": "2-3 sentence example project using these tools in ${topic}",
+  "nodes": [
+    {
+      "id": "unique_id",
+      "label": "Tool Name",
+      "category": "CORE|TOOL|INFRASTRUCTURE|CONCEPT|SKILL",
+      "description": "Practical how-to with specific ${topic} use case",
+      "difficulty": "Beginner|Intermediate|Advanced",
+      "tags": ["tag1", "tag2"],
+      "link": "https://official-site.com"
+    }
+  ],
+  "links": [
+    { "source": "prerequisite_id", "target": "dependent_id", "relationship": "enables" }
+  ]
+}`;
+
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a JSON-only response bot. Never output markdown fences, explanations, or anything outside the JSON object. Respond with valid JSON only.'
           },
-          required: ["projectSummary", "nodes", "links"]
+          { role: 'user', content: prompt }
+        ],
+        format: 'json',
+        stream: false,
+        options: {
+          temperature: 0.7 + (variation * 0.1),
+          num_predict: 4096,
         }
-      }
+      })
     });
 
-    const text = response.text();
-    if (!text) throw new Error("No data returned from AI");
+    if (!response.ok) {
+      throw new Error(`Ollama returned ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    const text = result.message?.content;
+    if (!text) throw new Error("No content returned from Ollama");
 
     const data = JSON.parse(text) as SkillTreeData;
+
+    if (!data.nodes || !data.links || data.nodes.length < 3) {
+      throw new Error("Response missing required fields or too few nodes");
+    }
+
     return data;
 
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.error("Ollama generation error:", error);
     return FALLBACK_DATA;
   }
 };

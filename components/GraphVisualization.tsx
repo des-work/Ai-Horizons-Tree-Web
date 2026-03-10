@@ -8,6 +8,7 @@ import {
   getNodeIcon,
   computeNodeLevels,
   getConnectedElements,
+  getFullPathBetweenStackNodes,
   getLinkNodeId,
 } from '../utils/graphUtils';
 import { SIMULATION, LAYOUT, ANIMATION, COLORS } from '../constants/theme';
@@ -18,8 +19,9 @@ import { SIMULATION, LAYOUT, ANIMATION, COLORS } from '../constants/theme';
 
 interface GraphVisualizationProps {
   data: SkillTreeData;
-  onNodeClick: (node: SimulationNode) => void;
+  onNodeClick: (node: SimulationNode | null) => void;
   selectedNodeId: string | null;
+  userStackIds?: Set<string>;
   width: number;
   height: number;
 }
@@ -71,6 +73,91 @@ const OrientationHint: React.FC = () => (
 );
 
 // ============================================================================
+// LATTICE GUIDE - Explains node groupings
+// ============================================================================
+
+const LatticeGuide: React.FC<{ onClose: () => void }> = ({ onClose }) => (
+  <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm" onClick={onClose}>
+    <div className="max-w-lg bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500 h-1"></div>
+      <div className="p-6">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="text-xl font-bold text-white">Lattice Layers</h3>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-white transition-colors"
+            aria-label="Close guide"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <p className="text-sm text-slate-400 mb-6">Nodes are organized in a vertical lattice from zenith to foundation:</p>
+        
+        <div className="space-y-4">
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center">
+              <span className="text-lg">🌟</span>
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-amber-400 mb-1">Top: Advanced Applications</h4>
+              <p className="text-xs text-slate-400">Cutting-edge implementations and specialized use cases.</p>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-purple-500/20 border-2 border-purple-400 flex items-center justify-center">
+              <span className="text-lg">🛠️</span>
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-purple-400 mb-1">Upper: AI Tools & IDEs</h4>
+              <p className="text-xs text-slate-400">Specific tools like Cursor, ChatGPT, Ollama, and Claude that implement the concepts.</p>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-pink-500/20 border-2 border-pink-400 flex items-center justify-center">
+              <span className="text-lg">⚡</span>
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-pink-400 mb-1">Middle: Skills & Concepts</h4>
+              <p className="text-xs text-slate-400">Practical skills like Vibe Coding, Prompt Engineering, and development practices.</p>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-cyan-500/20 border-2 border-cyan-400 flex items-center justify-center">
+              <span className="text-lg">🏗️</span>
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-cyan-400 mb-1">Lower: Infrastructure & Techniques</h4>
+              <p className="text-xs text-slate-400">Essential tools and methods like Version Control, Containerization, and Automation.</p>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-orange-500/20 border-2 border-orange-500 flex items-center justify-center">
+              <span className="text-lg">🏛️</span>
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-orange-400 mb-1">Bottom: Core / Foundation</h4>
+              <p className="text-xs text-slate-400">Your domain knowledge and fundamental concepts that everything builds upon.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 pt-4 border-t border-slate-800">
+          <p className="text-xs text-slate-500 italic">
+            💡 Tip: Click a node to see its connections. Add nodes to your stack to track your learning path.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+// ============================================================================
 // ZOOM CONTROLS
 // ============================================================================
 
@@ -78,9 +165,10 @@ interface ZoomControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
+  onShowGuide: () => void;
 }
 
-const ZoomControls: React.FC<ZoomControlsProps> = ({ onZoomIn, onZoomOut, onReset }) => (
+const ZoomControls: React.FC<ZoomControlsProps> = ({ onZoomIn, onZoomOut, onReset, onShowGuide }) => (
   <div className="absolute top-4 right-4 z-10 flex flex-col gap-1 rounded-lg bg-slate-950/80 backdrop-blur-sm border border-slate-700/80 p-1 shadow-lg">
     <button
       type="button"
@@ -116,6 +204,21 @@ const ZoomControls: React.FC<ZoomControlsProps> = ({ onZoomIn, onZoomOut, onRese
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4a8 8 0 108 8" />
       </svg>
     </button>
+    <div className="h-px bg-slate-600/80 my-0.5" />
+    <button
+      type="button"
+      onClick={onShowGuide}
+      className="p-2 rounded text-slate-300 hover:text-white hover:bg-orange-500/20 hover:border-orange-500/50 transition-colors relative group"
+      title="Show lattice layers guide"
+      aria-label="Show guide"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span className="absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-slate-900 text-xs text-slate-300 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        Lattice Guide
+      </span>
+    </button>
   </div>
 );
 
@@ -127,11 +230,23 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
   data,
   onNodeClick,
   selectedNodeId,
+  userStackIds = new Set(),
   width,
   height,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const [showGuide, setShowGuide] = React.useState(false);
+  const [showStackConnections, setShowStackConnections] = React.useState(false);
+  const hasAutoEnabledStackConnectionsRef = React.useRef(false);
+
+  // Auto-enable "Show Stack Connections" when user first adds 2+ nodes - keeps top connections visible
+  React.useEffect(() => {
+    if (userStackIds.size >= 2 && !hasAutoEnabledStackConnectionsRef.current) {
+      hasAutoEnabledStackConnectionsRef.current = true;
+      setShowStackConnections(true);
+    }
+  }, [userStackIds.size]);
 
   // Zoom control handlers
   const handleZoomIn = () => {
@@ -174,6 +289,14 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       });
     svg.call(zoom);
     zoomRef.current = zoom;
+
+    // Click on background to deselect node (show only stack)
+    svg.on('click', (event: MouseEvent) => {
+      // Only deselect if clicking on SVG background (not a node)
+      if (event.target === svgRef.current) {
+        onNodeClick(null as any); // Deselect current node
+      }
+    });
 
     // Double-click on background to reset zoom
     svg.on('dblclick.zoom', null); // remove default zoom-in on dblclick
@@ -384,40 +507,95 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     };
   }, [data, width, height, onNodeClick]);
 
-  // Selection highlighting effect
+  // Selection highlighting: ONLY show connections for clicked node, stack nodes stay highlighted without connections
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
 
-    if (!selectedNodeId) {
-      // Reset all elements to full opacity
-      svg
-        .selectAll('.node, .link')
-        .transition()
-        .duration(ANIMATION.selectionTransition)
+    const hasSelection = selectedNodeId || userStackIds.size > 0;
+
+    if (!hasSelection) {
+      // No selection — reset everything to full visibility
+      svg.selectAll<SVGGElement, SimulationNode>('.node')
+        .transition().duration(ANIMATION.selectionTransition)
         .style('opacity', 1);
+      svg.selectAll<SVGPathElement, SimulationLink>('.link')
+        .transition().duration(ANIMATION.selectionTransition)
+        .style('opacity', 1)
+        .attr('stroke', COLORS.link.default)
+        .attr('stroke-width', 2);
       return;
     }
 
-    // Get connected elements
-    const { nodeIds, linkIndices } = getConnectedElements(selectedNodeId, data.links);
+    // Build highlight sets
+    const highlightNodeIds = new Set<string>(userStackIds);
+    const highlightLinkIndices = new Set<number>();
+    const stackPathLinkIndices = new Set<number>();
 
-    // Dim non-connected nodes
+    // ONLY show connections for the explicitly selected node (if any)
+    if (selectedNodeId) {
+      highlightNodeIds.add(selectedNodeId);
+      const { nodeIds, linkIndices } = getConnectedElements(selectedNodeId, data.links);
+      nodeIds.forEach((id) => highlightNodeIds.add(id));
+      linkIndices.forEach((i) => highlightLinkIndices.add(i));
+    }
+
+    // Show connections between stack nodes when toggle is ON - full path top-to-bottom
+    if (showStackConnections && userStackIds.size >= 2) {
+      const { nodeIds: pathNodeIds, linkIndices: pathLinkIndices } = getFullPathBetweenStackNodes(
+        userStackIds,
+        data.links
+      );
+      pathNodeIds.forEach((id) => highlightNodeIds.add(id));
+      pathLinkIndices.forEach((i) => {
+        highlightLinkIndices.add(i);
+        const link = data.links[i];
+        const src = typeof link.source === 'string' ? link.source : (link.source as SimulationNode).id;
+        const tgt = typeof link.target === 'string' ? link.target : (link.target as SimulationNode).id;
+        if (userStackIds.has(src) && userStackIds.has(tgt)) {
+          stackPathLinkIndices.add(i);
+        }
+      });
+    } else {
+      // Just show direct links between stack nodes (no full connections)
+      data.links.forEach((link, i) => {
+        const src = typeof link.source === 'string' ? link.source : (link.source as SimulationNode).id;
+        const tgt = typeof link.target === 'string' ? link.target : (link.target as SimulationNode).id;
+        if (userStackIds.has(src) && userStackIds.has(tgt)) {
+          stackPathLinkIndices.add(i);
+          highlightLinkIndices.add(i);
+        }
+      });
+    }
+
+    // Apply opacity to nodes - dimmed nodes stay visible (lattice structure preserved)
     svg
       .selectAll<SVGGElement, SimulationNode>('.node')
       .transition()
       .duration(ANIMATION.selectionTransition)
-      .style('opacity', d => (nodeIds.has(d.id) ? 1 : 0.1));
+      .style('opacity', (d) => (highlightNodeIds.has(d.id) ? 1 : 0.4));
 
-    // Highlight connected links
+    // Apply styles to links
     svg
       .selectAll<SVGPathElement, SimulationLink>('.link')
       .transition()
       .duration(ANIMATION.selectionTransition)
-      .style('opacity', (_d, i) => (linkIndices.has(i) ? 1 : 0.05))
-      .attr('stroke', (_d, i) => (linkIndices.has(i) ? COLORS.link.highlight : COLORS.link.default))
-      .attr('stroke-width', (_d, i) => (linkIndices.has(i) ? 3 : 2));
-  }, [selectedNodeId, data.links]);
+      .style('opacity', (_d, i) => {
+        if (stackPathLinkIndices.has(i)) return 1;
+        if (highlightLinkIndices.has(i)) return 0.6;
+        return 0.15;
+      })
+      .attr('stroke', (_d, i) => {
+        if (stackPathLinkIndices.has(i)) return COLORS.link.highlight;
+        if (highlightLinkIndices.has(i)) return COLORS.link.default;
+        return COLORS.link.default;
+      })
+      .attr('stroke-width', (_d, i) => {
+        if (stackPathLinkIndices.has(i)) return 3.5;
+        if (highlightLinkIndices.has(i)) return 2;
+        return 1.5;
+      });
+  }, [selectedNodeId, data.links, userStackIds, showStackConnections]);
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-transparent">
@@ -427,13 +605,50 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onReset={handleResetView}
+        onShowGuide={() => setShowGuide(true)}
       />
+      
+      {/* Stack Connections Toggle - only show if there are stack nodes */}
+      {userStackIds.size >= 2 && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={() => setShowStackConnections(!showStackConnections)}
+            className={`
+              px-4 py-2 rounded-full text-sm font-medium transition-all shadow-lg backdrop-blur-sm
+              ${showStackConnections
+                ? 'bg-orange-500 text-white border-2 border-orange-400 shadow-orange-500/50'
+                : 'bg-slate-900/90 text-slate-300 border-2 border-slate-700 hover:border-orange-500/50 hover:text-white'
+              }
+            `}
+          >
+            <span className="flex items-center gap-2">
+              {showStackConnections ? (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  Hide Stack Connections
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  Show Stack Connections
+                </>
+              )}
+            </span>
+          </button>
+        </div>
+      )}
+      
       <svg
         ref={svgRef}
         width={width}
         height={height}
         className="w-full h-full block touch-none cursor-grab active:cursor-grabbing"
       />
+      {showGuide && <LatticeGuide onClose={() => setShowGuide(false)} />}
     </div>
   );
 };

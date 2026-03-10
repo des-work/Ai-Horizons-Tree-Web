@@ -1,46 +1,61 @@
-# How to Set Up Your Gemini API Key
+# How to Set Up Local AI with Ollama
 
-To enable AI-generated skill trees, you need a Google Gemini API key.
+AI Horizon uses **Ollama** to run AI models locally on your machine — no API keys or cloud accounts needed.
 
 ## Quick Setup
 
-1. **Get your API key:**
-   - Go to https://aistudio.google.com/app/apikey
-   - Sign in with your Google account
-   - Click "Create API Key"
-   - Copy the key
+1. **Install Ollama:**
+   - Go to https://ollama.com/download
+   - Download and install for your OS (Windows, Mac, Linux)
 
-2. **Create a `.env` file in the project root:**
+2. **Pull a model:**
    ```bash
-   # In the same folder as package.json
-   GEMINI_API_KEY=your_api_key_here
+   # Any of these will work — pick one based on your hardware
+   ollama pull llama3.2        # 3B — fast, works on most machines
+   ollama pull llama3.1        # 8B — better quality, needs ~8GB RAM
+   ollama pull mistral          # 7B — great all-rounder
    ```
 
-3. **Restart the dev server:**
+3. **Start Ollama** (it usually runs automatically after install):
    ```bash
-   # Stop the server (Ctrl+C)
+   ollama serve
+   ```
+
+4. **Start the dev server:**
+   ```bash
    npm run dev
    ```
 
-4. **Test it:**
-   - Go to http://localhost:8080
+5. **Test it:**
+   - Go to http://localhost:3000
    - Enter a field like "Healthcare Projects"
    - Press Enter or click "Explore"
-   - You should see a new tree generated!
+   - Your local model will generate the tree!
 
-## Without API Key
+## Custom Ollama URL
 
-If you don't set up an API key, the app will:
+If Ollama runs on a different host/port, create a `.env` file in the project root:
+
+```bash
+OLLAMA_URL=http://localhost:11434
+```
+
+## Without Ollama
+
+If Ollama isn't running or no models are installed, the app will:
 - Show the fallback demo data
 - Display a warning in the console
 - Still work for exploring the UI
 
 ## Troubleshooting
 
-**API key not working?**
-- Make sure the file is named exactly `.env` (with the dot)
-- Ensure there are no extra spaces in `GEMINI_API_KEY=your_key`
-- Restart the dev server after creating the file
+**Not generating new trees?**
+- Make sure Ollama is running: `ollama list` should show your installed models
+- Check that the Ollama server is reachable: visit http://localhost:11434 in your browser
+- Restart the dev server after any `.env` changes
 - Check the browser console for error messages
 
-
+**Generation is slow?**
+- Smaller models (llama3.2 3B, phi3) are faster
+- Close other GPU-heavy apps
+- Ollama uses GPU by default; if you only have CPU, expect 30-60s per generation

@@ -4,10 +4,10 @@
 
 import { SkillTreeData } from '../types';
 
-const CACHE_PREFIX = 'ai_horizons_cache_';
+const CACHE_PREFIX = 'ai_horizon_cache_';
 const CACHE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const API_COUNTER_KEY = 'ai_horizons_api_calls';
-const API_COUNTER_DATE_KEY = 'ai_horizons_api_date';
+const API_COUNTER_KEY = 'ai_horizon_api_calls';
+const API_COUNTER_DATE_KEY = 'ai_horizon_api_date';
 
 /** Normalize topic for cache key */
 function getCacheKey(topic: string, variation: number): string {

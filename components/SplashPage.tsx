@@ -504,7 +504,7 @@ const SplashPage: React.FC<SplashPageProps> = ({ onComplete }) => {
         }}
       >
         <div className="text-center px-8">
-          {/* Main title — AI white, Horizons gradient */}
+          {/* Main title — AI white, Horizon gradient */}
           <h1
             className="text-6xl sm:text-7xl md:text-9xl font-bold tracking-tight mb-3"
             style={{
@@ -521,7 +521,7 @@ const SplashPage: React.FC<SplashPageProps> = ({ onComplete }) => {
                 backgroundClip: 'text',
               }}
             >
-              Horizons
+              Horizon
             </span>
           </h1>
 

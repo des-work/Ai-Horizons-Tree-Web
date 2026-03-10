@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import GraphVisualization from './components/GraphVisualization';
 import DetailPanel from './components/DetailPanel';
+import AddNodeModal from './components/AddNodeModal';
 import SunsetBackground from './components/SunsetBackground';
-import { generateSkillTree, FALLBACK_DATA } from './services/geminiService';
-import { SkillTreeData, SkillNode } from './types';
+import { generateSkillTree, FALLBACK_DATA, fetchAvailableModels, OllamaModel } from './services/geminiService';
+import { SkillTreeData, SkillNode, SkillLink } from './types';
 import { useResizeObserver } from './hooks/useResizeObserver';
 import {
   getCachedResult,
@@ -24,41 +25,6 @@ const LoadingOverlay: React.FC = () => (
       <div className="absolute top-0 left-0 w-full h-full border-4 border-orange-500 rounded-full border-t-transparent animate-spin"></div>
     </div>
     <p className="mt-4 text-orange-400 font-mono text-sm animate-pulse">Illuminating Horizon...</p>
-  </div>
-);
-
-/** Project Summary Card */
-interface ProjectSummaryProps {
-  summary: string;
-  onDismiss: () => void;
-}
-
-const ProjectSummary: React.FC<ProjectSummaryProps> = ({ summary, onDismiss }) => (
-  <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 max-w-2xl w-full mx-4">
-    <div className="bg-gradient-to-r from-orange-900/90 via-rose-900/90 to-purple-900/90 border border-orange-500/50 rounded-lg px-6 py-4 backdrop-blur-sm shadow-2xl">
-      <div className="flex items-start gap-4">
-        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center border border-orange-500/50">
-          <svg className="w-5 h-5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-        </div>
-        <div className="flex-1">
-          <h3 className="text-sm font-bold text-orange-300 mb-2 flex items-center gap-2">
-            💡 Example Project
-          </h3>
-          <p className="text-sm text-slate-200 leading-relaxed">{summary}</p>
-        </div>
-        <button
-          onClick={onDismiss}
-          className="flex-shrink-0 text-slate-400 hover:text-white transition-colors"
-          aria-label="Dismiss"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    </div>
   </div>
 );
 
@@ -110,6 +76,110 @@ const ApiCallCounter: React.FC<{ apiCalls: number; fromCache: boolean }> = ({
   </div>
 );
 
+/** Model selector dropdown for local Ollama models */
+interface ModelSelectorProps {
+  models: OllamaModel[];
+  selectedModel: string;
+  onSelect: (model: string) => void;
+  isLoading: boolean;
+  ollamaConnected: boolean;
+}
+
+const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, onSelect, isLoading, ollamaConnected }) => {
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const formatSize = (bytes: number) => {
+    const gb = bytes / (1024 * 1024 * 1024);
+    return gb >= 1 ? `${gb.toFixed(1)}GB` : `${(bytes / (1024 * 1024)).toFixed(0)}MB`;
+  };
+
+  const displayName = selectedModel
+    ? selectedModel.split(':')[0]
+    : 'No model';
+
+  return (
+    <div ref={dropdownRef} className="relative hidden sm:block">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        disabled={isLoading}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium transition-all ${
+          ollamaConnected
+            ? 'border-slate-600 hover:border-orange-500/50 text-slate-300 hover:text-orange-400 bg-slate-800/50'
+            : 'border-red-800 text-red-400 bg-red-950/30'
+        } disabled:opacity-50`}
+        title={ollamaConnected ? `Active model: ${selectedModel}` : 'Ollama not connected'}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${ollamaConnected ? 'bg-green-400' : 'bg-red-500'}`} />
+        <span className="max-w-[100px] truncate">{displayName}</span>
+        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50">
+          <div className="px-3 py-2 border-b border-slate-800">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Local Models (Ollama)</p>
+          </div>
+          {models.length === 0 ? (
+            <div className="px-3 py-4 text-center">
+              <p className="text-xs text-slate-500">No models found</p>
+              <p className="text-[10px] text-slate-600 mt-1">Run <code className="text-orange-400">ollama pull llama3.2</code></p>
+            </div>
+          ) : (
+            <div className="max-h-48 overflow-y-auto">
+              {models.map((m) => {
+                const isActive = m.name === selectedModel;
+                return (
+                  <button
+                    key={m.name}
+                    onClick={() => { onSelect(m.name); setOpen(false); }}
+                    className={`w-full text-left px-3 py-2 flex items-center gap-3 transition-colors ${
+                      isActive
+                        ? 'bg-orange-500/10 border-l-2 border-orange-500'
+                        : 'hover:bg-slate-800 border-l-2 border-transparent'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-medium truncate ${isActive ? 'text-orange-400' : 'text-slate-300'}`}>
+                        {m.name.split(':')[0]}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {m.parameterSize && <span>{m.parameterSize}</span>}
+                        {m.parameterSize && m.family && <span> · </span>}
+                        {m.family && <span>{m.family}</span>}
+                        {(m.parameterSize || m.family) && <span> · </span>}
+                        <span>{formatSize(m.size)}</span>
+                      </p>
+                    </div>
+                    {isActive && (
+                      <svg className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** Header logo component */
 const Logo: React.FC = () => (
   <div className="flex items-center gap-3 z-10">
@@ -119,7 +189,7 @@ const Logo: React.FC = () => (
       </svg>
     </div>
     <h1 className="font-bold text-xl tracking-tight text-white">
-      AI <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-rose-500">Horizons</span>
+      AI <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-rose-500">Horizon</span>
     </h1>
   </div>
 );
@@ -225,20 +295,32 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<string>('Healthcare Projects');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Open by default so Add/Stack controls are visible
   const [variation, setVariation] = useState<number>(0);
-  const [showProjectSummary, setShowProjectSummary] = useState(false);
   const [apiCallCount, setApiCallCount] = useState<number>(0);
   const [lastResultFromCache, setLastResultFromCache] = useState<boolean>(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [userStack, setUserStack] = useState<Set<string>>(new Set());
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [ollamaConnected, setOllamaConnected] = useState(false);
 
   // Refs and hooks
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const lastApiCallRef = useRef<number>(0);
   const { width, height } = useResizeObserver(graphContainerRef);
 
-  // Sync API count from localStorage on mount
+  // Sync API count from localStorage on mount + fetch Ollama models
   useEffect(() => {
     setApiCallCount(getApiCallCount());
+
+    fetchAvailableModels().then((models) => {
+      setOllamaModels(models);
+      setOllamaConnected(models.length > 0);
+      if (models.length > 0 && !selectedModel) {
+        setSelectedModel(models[0].name);
+      }
+    });
   }, []);
 
   // Handlers
@@ -261,9 +343,9 @@ const App: React.FC = () => {
       setData(cached);
       setLastResultFromCache(true);
       setSelectedNode(null);
-      setIsSidebarOpen(false);
+      setUserStack(new Set());
       setError(null);
-      if (cached.projectSummary) setShowProjectSummary(true);
+      setIsSidebarOpen(true);
       return;
     }
 
@@ -275,15 +357,19 @@ const App: React.FC = () => {
     lastApiCallRef.current = now;
 
     try {
-      const newData = await generateSkillTree(prompt.trim(), newVariation);
+      const newData = await generateSkillTree(prompt.trim(), newVariation, selectedModel || undefined);
       setData(newData);
+      setUserStack(new Set());
 
       // Cache and count only real API results (not fallback data)
       if (newData.projectSummary) {
         setCachedResult(prompt.trim(), newVariation, newData);
         setApiCallCount(incrementApiCallCount());
-        setShowProjectSummary(true);
       }
+
+      // Open sidebar to show AI insight
+      setSelectedNode(null);
+      setIsSidebarOpen(true);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       console.error('Failed to generate tree:', err);
@@ -305,9 +391,15 @@ const App: React.FC = () => {
     }, 100);
   };
 
-  const handleNodeClick = useCallback((node: SkillNode) => {
-    setSelectedNode(node);
-    setIsSidebarOpen(true);
+  const handleNodeClick = useCallback((node: SkillNode | null) => {
+    if (node === null) {
+      // Clicking background - deselect and close sidebar
+      setSelectedNode(null);
+      setIsSidebarOpen(false);
+    } else {
+      setSelectedNode(node);
+      setIsSidebarOpen(true);
+    }
   }, []);
 
   const handleNavigateNode = useCallback(
@@ -330,8 +422,44 @@ const App: React.FC = () => {
     setError(null);
   }, []);
 
-  const handleDismissProjectSummary = useCallback(() => {
-    setShowProjectSummary(false);
+
+  const handleRemoveNode = useCallback((nodeId: string) => {
+    setData((prev) => ({
+      ...prev,
+      nodes: prev.nodes.filter((n) => n.id !== nodeId),
+      links: prev.links.filter((l) => l.source !== nodeId && l.target !== nodeId),
+    }));
+    setSelectedNode(null);
+    setIsSidebarOpen(false);
+  }, []);
+
+  const handleAddNode = useCallback((node: SkillNode, linkFromId?: string) => {
+    setData((prev) => {
+      const newLinks: SkillLink[] = linkFromId
+        ? [...prev.links, { source: linkFromId, target: node.id, relationship: 'enables' }]
+        : prev.links;
+      return {
+        ...prev,
+        nodes: [...prev.nodes, node],
+        links: newLinks,
+      };
+    });
+  }, []);
+
+  const handleOpenSidebar = useCallback(() => {
+    setIsSidebarOpen(true);
+  }, []);
+
+  const handleAddToStack = useCallback((nodeId: string) => {
+    setUserStack((prev) => new Set(prev).add(nodeId));
+  }, []);
+
+  const handleRemoveFromStack = useCallback((nodeId: string) => {
+    setUserStack((prev) => {
+      const next = new Set(prev);
+      next.delete(nodeId);
+      return next;
+    });
   }, []);
 
   return (
@@ -353,10 +481,36 @@ const App: React.FC = () => {
             isLoading={isLoading}
           />
 
-          <div className="flex items-center gap-4 text-sm text-slate-400 z-10">
+          <div className="flex items-center gap-2 sm:gap-3 text-sm text-slate-400 z-10 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-600 hover:border-orange-500/50 text-slate-300 hover:text-orange-400 transition-all text-xs font-medium"
+              title="Add new node to graph"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+              </svg>
+              New node
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenSidebar}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-600 hover:border-orange-500/50 text-slate-300 hover:text-orange-400 transition-all text-xs font-medium"
+              title="Open stack panel"
+            >
+              Stack
+            </button>
             <div className="h-4 w-px bg-slate-700 hidden sm:block"></div>
             <ApiCallCounter apiCalls={apiCallCount} fromCache={lastResultFromCache} />
-            <span className="font-mono text-xs opacity-50">v4.2.0-horizon</span>
+            <ModelSelector
+              models={ollamaModels}
+              selectedModel={selectedModel}
+              onSelect={setSelectedModel}
+              isLoading={isLoading}
+              ollamaConnected={ollamaConnected}
+            />
+            <span className="font-mono text-xs opacity-50 hidden sm:inline">v4.3.0-horizon</span>
           </div>
         </div>
 
@@ -400,11 +554,6 @@ const App: React.FC = () => {
           {/* Error Banner */}
           {error && <ErrorBanner message={error} onDismiss={handleDismissError} />}
 
-          {/* Project Summary */}
-          {showProjectSummary && data.projectSummary && (
-            <ProjectSummary summary={data.projectSummary} onDismiss={handleDismissProjectSummary} />
-          )}
-
           {/* Loading Overlay */}
           {isLoading && <LoadingOverlay />}
 
@@ -414,6 +563,7 @@ const App: React.FC = () => {
               data={data}
               onNodeClick={handleNodeClick}
               selectedNodeId={selectedNode?.id || null}
+              userStackIds={userStack}
               width={width}
               height={height}
             />
@@ -432,11 +582,25 @@ const App: React.FC = () => {
           <DetailPanel
             node={selectedNode}
             data={data}
+            userStack={userStack}
+            currentTopic={prompt}
             onNavigate={handleNavigateNode}
             onClose={handleCloseSidebar}
+            onAddToStack={handleAddToStack}
+            onRemoveFromStack={handleRemoveFromStack}
+            onRemoveNode={handleRemoveNode}
+            onAddNewNode={() => setShowAddModal(true)}
           />
         </aside>
       </main>
+
+      {showAddModal && (
+        <AddNodeModal
+          data={data}
+          onAdd={handleAddNode}
+          onClose={() => setShowAddModal(false)}
+        />
+      )}
     </div>
   );
 };

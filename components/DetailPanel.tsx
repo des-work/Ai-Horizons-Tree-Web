@@ -9,8 +9,14 @@ import { getCategoryClasses, getIncomingConnections, getOutgoingConnections, Nod
 interface DetailPanelProps {
   node: SkillNode | null;
   data: SkillTreeData;
+  userStack: Set<string>;
+  currentTopic: string;
   onClose: () => void;
   onNavigate: (nodeId: string) => void;
+  onAddToStack: (nodeId: string) => void;
+  onRemoveFromStack: (nodeId: string) => void;
+  onRemoveNode?: (nodeId: string) => void;
+  onAddNewNode?: () => void;
 }
 
 // ============================================================================
@@ -18,58 +24,205 @@ interface DetailPanelProps {
 // ============================================================================
 
 /** Empty state shown when no node is selected */
-const EmptyState: React.FC = () => (
-  <div className="h-full flex items-center justify-center p-8 text-center border-l border-slate-800 bg-slate-900/95 backdrop-blur-xl relative overflow-hidden">
-    {/* Background decoration */}
-    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500"></div>
+interface EmptyStateProps {
+  userStack: Set<string>;
+  data: SkillTreeData;
+  currentTopic: string;
+  onNavigate: (nodeId: string) => void;
+  onRemoveFromStack: (nodeId: string) => void;
+  onAddNewNode?: () => void;
+}
 
-    <div className="max-w-sm flex flex-col items-center z-10">
-      <div className="w-24 h-24 mb-8 rounded-full bg-gradient-to-b from-orange-400/20 to-purple-600/20 flex items-center justify-center border border-orange-500/30 relative">
-        <div className="absolute inset-0 rounded-full border border-orange-400/20 animate-pulse"></div>
-        <span className="text-5xl">☀️</span>
+const EmptyState: React.FC<EmptyStateProps> = ({ userStack, data, currentTopic, onNavigate, onRemoveFromStack, onAddNewNode }) => {
+  const stackNodes = data.nodes.filter((n) => userStack.has(n.id));
+  // Find direct links between stack nodes (no intermediary paths)
+  const stackLinks = data.links.filter(
+    (l) => userStack.has(l.source) && userStack.has(l.target)
+  );
+
+  return (
+    <div className="h-full flex flex-col border-l border-slate-800 bg-slate-900/95 backdrop-blur-xl relative overflow-hidden">
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500"></div>
+
+      <div className="flex-none p-6 border-b border-slate-800">
+        <h3 className="text-lg font-bold text-white mb-1">Your stack</h3>
+        <p className="text-xs text-slate-400">
+          {stackNodes.length === 0
+            ? 'Select nodes to build your stack'
+            : `${stackNodes.length} node${stackNodes.length === 1 ? '' : 's'} selected`}
+        </p>
       </div>
 
-      <h3 className="text-xl font-bold text-white mb-4">The AI Horizon</h3>
+      <div className="flex-1 overflow-y-auto p-6">
+        {/* AI Project Insight */}
+        {data.projectSummary && (
+          <div className="mb-5">
+            <div className="rounded-lg border border-orange-500/30 overflow-hidden">
+              <div className="bg-gradient-to-r from-orange-500/15 via-rose-500/10 to-purple-500/10 px-4 py-2.5 border-b border-orange-500/20 flex items-center gap-2">
+                <span className="text-sm">🧠</span>
+                <h4 className="text-xs font-bold text-orange-400 uppercase tracking-wider">AI Insight</h4>
+                {currentTopic && (
+                  <span className="ml-auto text-[10px] text-slate-500 font-mono truncate max-w-[120px]">{currentTopic}</span>
+                )}
+              </div>
+              <div className="bg-slate-800/40 px-4 py-3">
+                <p className="text-xs text-slate-300 leading-relaxed">{data.projectSummary}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
-      <div className="space-y-4 text-sm text-slate-400 leading-relaxed">
-        <p>
-          Discover how AI tools can accelerate your projects—whether you're in healthcare, marketing, education, or any field.
-        </p>
-        <p className="text-orange-400 font-medium mt-4">
-          🔍 Enter your field or project type above and click "Explore"
-        </p>
-        <p className="text-purple-400 font-medium">
-          🔀 Click "Shuffle" to see different tool combinations
-        </p>
-        <p className="text-amber-400 font-medium">
-          👆 Click any node to see practical usage examples
-        </p>
-        <p className="text-xs italic opacity-70 mt-4">
-          The graph shows you which tools to use, how they connect, and specific ways to apply them to real projects in your field.
-        </p>
+        {stackNodes.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-800/50 border border-slate-700 flex items-center justify-center">
+              <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <p className="text-slate-500 text-sm mb-2">Your stack is empty</p>
+            <p className="text-slate-400 text-xs mb-3">Click nodes and add them to your stack. The panel stays open so you can quickly build your stack.</p>
+            <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 text-xs text-slate-300">
+              <p className="font-medium text-orange-400 mb-1">💡 Pro tip:</p>
+              <p>After adding 2+ nodes, click "Show Stack Connections" button at the bottom to see how they relate!</p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* Stack nodes */}
+            {stackNodes.map((n) => (
+              <div
+                key={n.id}
+                className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 hover:border-orange-500/30 cursor-pointer group transition-all"
+                onClick={() => onNavigate(n.id)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0"></div>
+                    <span className="text-sm font-medium text-white group-hover:text-orange-400 truncate">{n.label}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveFromStack(n.id);
+                    }}
+                    className="text-slate-500 hover:text-red-400 text-xs p-1 flex-shrink-0"
+                    title="Remove from stack"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <span className="text-[10px] text-slate-500 ml-4">{n.category}</span>
+              </div>
+            ))}
+
+            {/* Direct connections between stack nodes */}
+            {stackLinks.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-800">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Direct connections</h4>
+                <div className="space-y-2">
+                  {stackLinks.map((l, i) => {
+                    const src = data.nodes.find((n) => n.id === l.source);
+                    const tgt = data.nodes.find((n) => n.id === l.target);
+                    if (!src || !tgt) return null;
+                    return (
+                      <div
+                        key={i}
+                        className="p-2 rounded-lg bg-slate-800/30 border border-slate-700/50 flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-800/50 transition-colors"
+                        onClick={() => onNavigate(tgt.id)}
+                      >
+                        <span className="text-orange-400 font-medium">{src.label}</span>
+                        <span className="text-slate-600">→</span>
+                        <span className="text-[9px] text-slate-500 italic">{l.relationship}</span>
+                        <span className="text-slate-600">→</span>
+                        <span className="text-orange-400 font-medium">{tgt.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Hint when there's only 1 node */}
+            {stackNodes.length === 1 && (
+              <div className="mt-4 p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg text-center">
+                <p className="text-slate-400 text-xs mb-2">
+                  Keep adding! Click more nodes and add them to your stack.
+                </p>
+                <p className="text-slate-500 text-[10px]">
+                  With 2+ nodes, you can use <span className="text-orange-400">"Show Stack Connections"</span> to reveal how they connect.
+                </p>
+              </div>
+            )}
+
+            {/* No direct links between 2+ nodes */}
+            {stackNodes.length >= 2 && stackLinks.length === 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-800">
+                <div className="bg-slate-800/30 border border-slate-700/50 rounded-lg p-3 text-center">
+                  <p className="text-slate-400 text-xs mb-2">
+                    No direct connections found. These nodes may connect through intermediary nodes.
+                  </p>
+                  <p className="text-orange-400 text-xs font-medium">
+                    Try "Show Stack Connections" to reveal the full network!
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 /** Individual connection item in the lattice view */
 interface ConnectionItemProps {
   connection: NodeConnection;
   onNavigate: (nodeId: string) => void;
+  onAddToStack: (nodeId: string) => void;
+  userStack: Set<string>;
 }
 
-const ConnectionItem: React.FC<ConnectionItemProps> = ({ connection, onNavigate }) => {
+const ConnectionItem: React.FC<ConnectionItemProps> = ({ connection, onNavigate, onAddToStack, userStack }) => {
   if (!connection.node) return null;
 
+  const isInStack = userStack.has(connection.node.id);
+
   return (
-    <div
-      onClick={() => onNavigate(connection.node!.id)}
-      className="group flex items-center justify-between p-2 bg-slate-800/40 hover:bg-slate-800 rounded border border-transparent hover:border-slate-700 cursor-pointer transition-all"
-    >
-      <span className="text-sm text-slate-300 group-hover:text-white">
-        {connection.node.label}
-      </span>
-      <span className="text-[10px] text-slate-500 italic">{connection.relationship}</span>
+    <div className="group flex items-center gap-2 p-2 bg-slate-800/40 hover:bg-slate-800 rounded border border-transparent hover:border-slate-700 transition-all">
+      <div
+        onClick={() => onNavigate(connection.node!.id)}
+        className="flex-1 flex items-center justify-between cursor-pointer min-w-0"
+      >
+        <span className="text-sm text-slate-300 group-hover:text-white truncate">
+          {connection.node.label}
+        </span>
+        <span className="text-[10px] text-slate-500 italic flex-shrink-0 ml-2">{connection.relationship}</span>
+      </div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onAddToStack(connection.node!.id);
+        }}
+        className={`flex-shrink-0 p-1.5 rounded transition-all ${
+          isInStack
+            ? 'text-green-500 bg-green-500/10 cursor-default'
+            : 'text-slate-500 hover:text-orange-400 hover:bg-orange-500/10'
+        }`}
+        disabled={isInStack}
+        title={isInStack ? 'In stack' : 'Add to stack'}
+      >
+        {isInStack ? (
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 };
@@ -128,10 +281,32 @@ const LinkIcon: React.FC = () => (
 // MAIN COMPONENT
 // ============================================================================
 
-const DetailPanel: React.FC<DetailPanelProps> = ({ node, data, onClose, onNavigate }) => {
+const DetailPanel: React.FC<DetailPanelProps> = ({
+  node,
+  data,
+  userStack,
+  currentTopic,
+  onClose,
+  onNavigate,
+  onAddToStack,
+  onRemoveFromStack,
+  onRemoveNode,
+  onAddNewNode,
+}) => {
   if (!node) {
-    return <EmptyState />;
+    return (
+      <EmptyState
+        userStack={userStack}
+        data={data}
+        currentTopic={currentTopic}
+        onNavigate={onNavigate}
+        onRemoveFromStack={onRemoveFromStack}
+        onAddNewNode={onAddNewNode}
+      />
+    );
   }
+
+  const isInStack = userStack.has(node.id);
 
   // Compute connections using utility functions
   const incoming = getIncomingConnections(node.id, data);
@@ -148,16 +323,53 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ node, data, onClose, onNaviga
           <span className={`px-2 py-1 rounded text-[10px] font-mono font-bold uppercase tracking-widest border ${categoryClasses}`}>
             {node.category}
           </span>
-          <button
-            onClick={onClose}
-            className="text-slate-500 hover:text-white transition-colors p-1 hover:bg-slate-800 rounded"
-            aria-label="Close panel"
-          >
-            <CloseIcon />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onClose}
+              className="text-slate-500 hover:text-white transition-colors p-1 hover:bg-slate-800 rounded"
+              aria-label="Close panel"
+            >
+              <CloseIcon />
+            </button>
+          </div>
         </div>
 
         <h2 className="text-2xl font-bold text-white mb-3 leading-tight">{node.label}</h2>
+
+        {/* Add / Remove from stack */}
+        <div className="mb-4">
+          {isInStack ? (
+            <button
+              type="button"
+              onClick={() => onRemoveFromStack(node.id)}
+              className="w-full py-2.5 px-4 rounded-lg border border-slate-600 text-slate-400 hover:text-red-400 hover:border-red-500/50 hover:bg-red-500/5 transition-all text-sm font-medium flex items-center justify-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+              </svg>
+              Remove from stack
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => onAddToStack(node.id)}
+                className="w-full py-2.5 px-4 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white font-medium hover:from-orange-400 hover:to-rose-400 transition-all text-sm flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+                </svg>
+                Add to stack
+              </button>
+              {userStack.size >= 1 && (
+                <p className="text-xs text-center text-slate-400">
+                  Keep clicking nodes to add more! 
+                  <span className="text-orange-400"> ({userStack.size} in stack)</span>
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-wrap gap-2">
           {node.tags.map(tag => (
@@ -210,20 +422,18 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ node, data, onClose, onNaviga
             {incoming.length > 0 ? (
               <div className="space-y-2">
                 {incoming.map((connection, idx) => (
-                  <ConnectionItem key={idx} connection={connection} onNavigate={onNavigate} />
+                  <ConnectionItem
+                    key={idx}
+                    connection={connection}
+                    onNavigate={onNavigate}
+                    onAddToStack={onAddToStack}
+                    userStack={userStack}
+                  />
                 ))}
               </div>
             ) : (
               <div className="text-xs text-slate-600 italic p-2">Horizon Node (Foundation)</div>
             )}
-          </div>
-
-          {/* CURRENT - Selected node indicator */}
-          <div className="relative pb-6 pl-8">
-            <TimelineMarker type="current" />
-            <div className="py-2 px-3 bg-gradient-to-r from-orange-900/30 to-transparent rounded border-l-2 border-orange-500">
-              <span className="text-sm font-bold text-orange-400 block">Current Selection</span>
-            </div>
           </div>
 
           {/* DOWNSTREAM - Nodes that this node unlocks */}
@@ -234,7 +444,13 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ node, data, onClose, onNaviga
             {outgoing.length > 0 ? (
               <div className="space-y-2">
                 {outgoing.map((connection, idx) => (
-                  <ConnectionItem key={idx} connection={connection} onNavigate={onNavigate} />
+                  <ConnectionItem
+                    key={idx}
+                    connection={connection}
+                    onNavigate={onNavigate}
+                    onAddToStack={onAddToStack}
+                    userStack={userStack}
+                  />
                 ))}
               </div>
             ) : (
