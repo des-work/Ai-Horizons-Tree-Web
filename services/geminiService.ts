@@ -194,99 +194,40 @@ export const FALLBACK_DATA: SkillTreeData = {
   ]
 };
 
-// Timeout for Ollama requests — local models can be slow
-const REQUEST_TIMEOUT_MS = 120_000; // 120 seconds
+// Timeout for Ollama requests
+const REQUEST_TIMEOUT_MS = 60_000; // 60s — this is a small query now
 
 /**
- * Parse and validate raw Ollama output into SkillTreeData.
- * Handles markdown fence stripping, JSON parsing, and field validation.
+ * Result from the AI: which nodes to highlight and a project description.
+ * The graph data itself never changes.
  */
-function parseModelResponse(rawText: string): SkillTreeData {
-  // Strip markdown fences some models add despite instructions
-  const text = rawText
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/, '')
-    .trim();
-
-  let data: SkillTreeData;
-  try {
-    data = JSON.parse(text) as SkillTreeData;
-  } catch {
-    throw new Error("Model returned invalid JSON — try a different model or rephrase your query");
-  }
-
-  if (!Array.isArray(data.nodes) || !Array.isArray(data.links) || data.nodes.length < 3) {
-    throw new Error("Response missing required fields or too few nodes");
-  }
-
-  // Ensure every node has required fields with safe defaults
-  const nodeIdSet = new Set<string>();
-  data.nodes = data.nodes.map(n => {
-    nodeIdSet.add(n.id);
-    return {
-      id: n.id,
-      label: n.label || n.id,
-      description: n.description || '',
-      category: n.category || NodeType.TOOL,
-      difficulty: n.difficulty || 'Intermediate',
-      tags: Array.isArray(n.tags) ? n.tags : [],
-      ...(n.link ? { link: n.link } : {}),
-      ...(n.resources ? { resources: n.resources } : {}),
-    };
-  });
-
-  // Validate links: remove any that reference non-existent nodes
-  data.links = data.links.filter(l => nodeIdSet.has(l.source as string) && nodeIdSet.has(l.target as string));
-
-  // Validate projectNodes: keep only IDs that exist
-  if (Array.isArray(data.projectNodes) && data.projectNodes.length > 0) {
-    data.projectNodes = data.projectNodes.filter(id => nodeIdSet.has(id));
-  }
-
-  // If model didn't return projectNodes, auto-generate a path from CORE outward
-  if (!data.projectNodes || data.projectNodes.length === 0) {
-    const core = data.nodes.find(n => n.category === NodeType.CORE);
-    if (core) {
-      const path = [core.id];
-      const visited = new Set([core.id]);
-      let current = core.id;
-      for (let step = 0; step < 3; step++) {
-        const next = data.links.find(l => l.source === current && !visited.has(l.target as string));
-        if (!next) break;
-        const targetId = next.target as string;
-        path.push(targetId);
-        visited.add(targetId);
-        current = targetId;
-      }
-      data.projectNodes = path;
-    }
-  }
-
-  return data;
+export interface ProjectInsight {
+  projectSummary: string;
+  projectNodes: string[];  // IDs of nodes to highlight
 }
 
-export const generateSkillTree = async (
+/**
+ * Ask the local model which of the existing graph nodes are relevant
+ * to a given topic/job, and to describe an example project using them.
+ * This is a lightweight query (~200 output tokens) so it's fast even on small models.
+ */
+export async function generateProjectInsight(
   topic: string,
-  variation: number = 0,
+  existingNodes: { id: string; label: string }[],
   selectedModel?: string
-): Promise<SkillTreeData> => {
+): Promise<ProjectInsight | null> {
   try {
     const model = selectedModel || undefined;
-    if (!model) {
-      console.warn("No model selected. Using fallback data.");
-      return FALLBACK_DATA;
-    }
+    if (!model) return null;
 
-    // ---------------------------------------------------------------
-    // Prompt — kept as minimal as possible for small local models.
-    // Asks for only 6 nodes with short descriptions to keep output
-    // under ~800 tokens, achievable in 15-30s on most hardware.
-    // ---------------------------------------------------------------
-    const prompt = `Create a JSON skill tree for "${topic}".${variation > 0 ? ` Variation ${variation}.` : ''} Return JSON only.
+    const nodeList = existingNodes.map(n => `${n.id}: ${n.label}`).join(', ');
 
-{"projectSummary":"One sentence describing an example ${topic} project.","projectNodes":["core","n1","n2","n3"],"nodes":[{"id":"core","label":"${topic}","category":"CORE","description":"The foundation.","difficulty":"Beginner","tags":["foundation"]},{"id":"n1","label":"Tool 1","category":"INFRASTRUCTURE","description":"...","difficulty":"Beginner","tags":["infra"]},{"id":"n2","label":"Skill 1","category":"SKILL","description":"...","difficulty":"Intermediate","tags":["skill"]},{"id":"n3","label":"AI Tool","category":"TOOL","description":"...","difficulty":"Intermediate","tags":["ai"]},{"id":"n4","label":"Concept","category":"CONCEPT","description":"...","difficulty":"Advanced","tags":["concept"]},{"id":"n5","label":"Tool 2","category":"TOOL","description":"...","difficulty":"Advanced","tags":["ai"]}],"links":[{"source":"core","target":"n1","relationship":"enables"},{"source":"core","target":"n2","relationship":"enables"},{"source":"n1","target":"n3","relationship":"uses"},{"source":"n2","target":"n4","relationship":"explores"},{"source":"n3","target":"n5","relationship":"powers"}]}
+    const prompt = `Given these tools/skills: [${nodeList}]
 
-Replace all names, descriptions, and tags with real tools and skills for ${topic}. Keep descriptions to ONE sentence each. Return 6 nodes total.`;
+A user is interested in "${topic}". Pick 3-5 of these tools that would be most useful for a ${topic} project. Return JSON only:
+{"projectSummary":"2-3 sentences describing a concrete example project in ${topic} using the selected tools. Be specific about what gets built.","projectNodes":["id1","id2","id3"]}
+
+Use ONLY IDs from the list above. Return valid JSON only, nothing else.`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -299,14 +240,12 @@ Replace all names, descriptions, and tags with real tools and skills for ${topic
         signal: controller.signal,
         body: JSON.stringify({
           model,
-          messages: [
-            { role: 'user', content: prompt }
-          ],
+          messages: [{ role: 'user', content: prompt }],
           format: 'json',
           stream: false,
           options: {
-            temperature: Math.min(0.7 + (variation * 0.1), 1.0),
-            num_predict: 1024,
+            temperature: 0.7,
+            num_predict: 300,
           }
         })
       });
@@ -323,10 +262,27 @@ Replace all names, descriptions, and tags with real tools and skills for ${topic
     const rawText: string = result.message?.content ?? '';
     if (!rawText) throw new Error("No content returned from Ollama");
 
-    return parseModelResponse(rawText);
+    // Strip markdown fences
+    const text = rawText
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/, '')
+      .trim();
+
+    const data = JSON.parse(text) as ProjectInsight;
+
+    // Validate: only keep node IDs that actually exist
+    const validIds = new Set(existingNodes.map(n => n.id));
+    const projectNodes = (data.projectNodes || []).filter(id => validIds.has(id));
+
+    if (projectNodes.length === 0) return null;
+
+    return {
+      projectSummary: data.projectSummary || `Example project for ${topic}`,
+      projectNodes,
+    };
 
   } catch (error) {
-    console.error("Ollama generation error:", error instanceof Error ? error.message : error);
-    return FALLBACK_DATA;
+    console.error("Project insight error:", error instanceof Error ? error.message : error);
+    return null;
   }
-};
+}

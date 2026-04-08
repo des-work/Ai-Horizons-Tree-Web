@@ -3,14 +3,12 @@ import GraphVisualization from './components/GraphVisualization';
 import DetailPanel from './components/DetailPanel';
 import AddNodeModal from './components/AddNodeModal';
 import SunsetBackground from './components/SunsetBackground';
-import { generateSkillTree, FALLBACK_DATA, fetchAvailableModels, OllamaModel } from './services/geminiService';
+import { generateProjectInsight, FALLBACK_DATA, fetchAvailableModels, OllamaModel } from './services/geminiService';
 import { SkillTreeData, SkillNode, SkillLink } from './types';
 import { useResizeObserver } from './hooks/useResizeObserver';
 import {
-  getCachedResult,
-  setCachedResult,
-  incrementApiCallCount,
   getApiCallCount,
+  incrementApiCallCount,
 } from './utils/cacheUtils';
 
 // ============================================================================
@@ -305,16 +303,14 @@ const MobileSearchOverlay: React.FC<SearchBarProps> = ({ value, onChange, onSubm
 const COOLDOWN_MS = 1500; // Prevent rapid API calls
 
 const App: React.FC = () => {
-  // State
+  // State — graph data is always FALLBACK_DATA; only the insight (highlights + summary) changes
   const [data, setData] = useState<SkillTreeData>(FALLBACK_DATA);
   const [selectedNode, setSelectedNode] = useState<SkillNode | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState<string>('Healthcare Projects');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // Open by default so Add/Stack controls are visible
-  const [variation, setVariation] = useState<number>(0);
+  const [prompt, setPrompt] = useState<string>('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [apiCallCount, setApiCallCount] = useState<number>(0);
-  const [lastResultFromCache, setLastResultFromCache] = useState<boolean>(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [userStack, setUserStack] = useState<Set<string>>(new Set());
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
@@ -323,7 +319,6 @@ const App: React.FC = () => {
 
   // Refs and hooks
   const graphContainerRef = useRef<HTMLDivElement>(null);
-  // Initialize far in the past so the very first call is never blocked by the cooldown
   const lastApiCallRef = useRef<number>(Date.now() - COOLDOWN_MS);
   const { width, height } = useResizeObserver(graphContainerRef);
 
@@ -335,91 +330,67 @@ const App: React.FC = () => {
       setOllamaModels(models);
       setOllamaConnected(models.length > 0);
       if (models.length > 0) {
-        // Use functional update to avoid stale closure over selectedModel
         setSelectedModel(prev => prev || models[0].name);
       }
     });
   }, []);
 
   // Handlers
-  const handleGenerate = async (e?: React.FormEvent, shuffle: boolean = false) => {
+  const handleGenerate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!prompt.trim()) return;
 
-    // Cooldown: prevent rapid double-clicks
+    // Cooldown
     const now = Date.now();
-    if (now - lastApiCallRef.current < COOLDOWN_MS) {
-      return; // Ignore rapid clicks
-    }
+    if (now - lastApiCallRef.current < COOLDOWN_MS) return;
 
-    const newVariation = shuffle ? variation + 1 : 0;
-    setVariation(newVariation);
-
-    // Check cache first (saves API costs!)
-    const cached = getCachedResult(prompt.trim(), newVariation);
-    if (cached) {
-      setData(cached);
-      setLastResultFromCache(true);
-      setSelectedNode(null);
-      setUserStack(new Set());
-      setError(null);
-      setIsSidebarOpen(true);
-      return;
-    }
-
-    setLastResultFromCache(false);
     setIsLoading(true);
     setSelectedNode(null);
-    setIsSidebarOpen(false);
     setError(null);
     lastApiCallRef.current = now;
 
     try {
-      const newData = await generateSkillTree(prompt.trim(), newVariation, selectedModel || undefined);
+      const insight = await generateProjectInsight(
+        prompt.trim(),
+        FALLBACK_DATA.nodes.map(n => ({ id: n.id, label: n.label })),
+        selectedModel || undefined
+      );
 
-      // generateSkillTree never throws — it returns FALLBACK_DATA on failure.
-      // Detect this by checking for projectSummary (FALLBACK_DATA always has one,
-      // but so does a real result). Instead, check for no nodes OR that the data
-      // object is the exact FALLBACK_DATA reference returned on error.
-      const isFallback = newData === FALLBACK_DATA;
-
-      setData(newData);
-      setUserStack(new Set());
-
-      if (isFallback) {
+      if (insight) {
+        // Update the data with the new insight — graph nodes stay the same
+        setData({
+          ...FALLBACK_DATA,
+          projectSummary: insight.projectSummary,
+          projectNodes: insight.projectNodes,
+        });
+        setApiCallCount(incrementApiCallCount());
+      } else {
         setError(
           ollamaConnected
-            ? 'Generation failed — the model may have timed out or returned bad data. Try a smaller/faster model (e.g. llama3.2 or mistral) from the model selector.'
+            ? 'Generation failed — try a different model (e.g. llama3.2 or mistral) from the model selector.'
             : 'Ollama is not running. Start Ollama and pull a model, then try again.'
         );
-      } else {
-        // Cache and count only real API results
-        setCachedResult(prompt.trim(), newVariation, newData);
-        setApiCallCount(incrementApiCallCount());
       }
 
-      setSelectedNode(null);
       setIsSidebarOpen(true);
     } catch (err) {
-      // generateSkillTree swallows errors internally, but guard anyway
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
-      console.error('Failed to generate tree:', err);
+      console.error('Failed to generate insight:', err);
       setError(errorMessage);
-      setIsSidebarOpen(true); // Re-open sidebar so project overview remains visible
+      setIsSidebarOpen(true);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleShuffle = () => {
-    handleGenerate(undefined, true);
+    handleGenerate(undefined);
   };
 
   const handleQuickExample = (example: string) => {
     setPrompt(example);
-    setVariation(0); // Reset variation for new topic
     setTimeout(() => {
-      handleGenerate(undefined, false);
+      handleGenerate(undefined);
     }, 100);
   };
 
@@ -534,7 +505,7 @@ const App: React.FC = () => {
               Stack
             </button>
             <div className="h-4 w-px bg-slate-700 hidden sm:block"></div>
-            <ApiCallCounter apiCalls={apiCallCount} fromCache={lastResultFromCache} />
+            <ApiCallCounter apiCalls={apiCallCount} fromCache={false} />
             <ModelSelector
               models={ollamaModels}
               selectedModel={selectedModel}
