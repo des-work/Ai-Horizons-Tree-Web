@@ -389,7 +389,7 @@ const App: React.FC = () => {
       if (isFallback) {
         setError(
           ollamaConnected
-            ? 'The model returned an unusable response. Showing default data — try a different model or rephrase your query.'
+            ? 'Generation failed — the model may have timed out or returned bad data. Try a smaller/faster model (e.g. llama3.2 or mistral) from the model selector.'
             : 'Ollama is not running. Start Ollama and pull a model, then try again.'
         );
       } else {

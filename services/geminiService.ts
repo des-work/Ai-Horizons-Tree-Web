@@ -21,12 +21,25 @@ export async function fetchAvailableModels(): Promise<OllamaModel[]> {
       details?: { parameter_size?: string; family?: string };
     }> = data.models || [];
 
-    return models.map(m => ({
+    const mapped = models.map(m => ({
       name: m.name,
       size: m.size,
       parameterSize: m.details?.parameter_size || '',
       family: m.details?.family || '',
     }));
+
+    // Sort so fast text models come first. Vision/VL models are too slow for JSON generation.
+    // Preferred models (known-good for structured JSON) get priority 0,
+    // generic text models get 1, vision models get 2.
+    const modelPriority = (name: string): number => {
+      const n = name.toLowerCase();
+      if (/\b(vl|vision|llava|moondream)\b/.test(n)) return 2; // vision — slow
+      if (/\b(llama|mistral|gemma|qwen2?\.?5?|phi|deepseek)\b/.test(n) && !/vl/.test(n)) return 0; // fast text
+      return 1; // unknown — middle
+    };
+    mapped.sort((a, b) => modelPriority(a.name) - modelPriority(b.name));
+
+    return mapped;
   } catch {
     return [];
   }
@@ -181,8 +194,8 @@ export const FALLBACK_DATA: SkillTreeData = {
   ]
 };
 
-// Timeout for Ollama requests — prevents the UI from hanging indefinitely
-const REQUEST_TIMEOUT_MS = 60_000; // 60 seconds
+// Timeout for Ollama requests — local models can be slow
+const REQUEST_TIMEOUT_MS = 120_000; // 120 seconds
 
 /**
  * Parse and validate raw Ollama output into SkillTreeData.
@@ -206,10 +219,47 @@ function parseModelResponse(rawText: string): SkillTreeData {
     throw new Error("Response missing required fields or too few nodes");
   }
 
-  // Validate projectNodes: remove any IDs that don't correspond to real nodes
+  // Ensure every node has required fields with safe defaults
+  const nodeIdSet = new Set<string>();
+  data.nodes = data.nodes.map(n => {
+    nodeIdSet.add(n.id);
+    return {
+      id: n.id,
+      label: n.label || n.id,
+      description: n.description || '',
+      category: n.category || NodeType.TOOL,
+      difficulty: n.difficulty || 'Intermediate',
+      tags: Array.isArray(n.tags) ? n.tags : [],
+      ...(n.link ? { link: n.link } : {}),
+      ...(n.resources ? { resources: n.resources } : {}),
+    };
+  });
+
+  // Validate links: remove any that reference non-existent nodes
+  data.links = data.links.filter(l => nodeIdSet.has(l.source as string) && nodeIdSet.has(l.target as string));
+
+  // Validate projectNodes: keep only IDs that exist
   if (Array.isArray(data.projectNodes) && data.projectNodes.length > 0) {
-    const nodeIdSet = new Set(data.nodes.map(n => n.id));
     data.projectNodes = data.projectNodes.filter(id => nodeIdSet.has(id));
+  }
+
+  // If model didn't return projectNodes, auto-generate a path from CORE outward
+  if (!data.projectNodes || data.projectNodes.length === 0) {
+    const core = data.nodes.find(n => n.category === NodeType.CORE);
+    if (core) {
+      const path = [core.id];
+      const visited = new Set([core.id]);
+      let current = core.id;
+      for (let step = 0; step < 3; step++) {
+        const next = data.links.find(l => l.source === current && !visited.has(l.target as string));
+        if (!next) break;
+        const targetId = next.target as string;
+        path.push(targetId);
+        visited.add(targetId);
+        current = targetId;
+      }
+      data.projectNodes = path;
+    }
   }
 
   return data;
@@ -228,22 +278,15 @@ export const generateSkillTree = async (
     }
 
     // ---------------------------------------------------------------
-    // Prompt — kept short so small models (3B–8B) can handle it fast.
-    // Key changes vs. the old prompt:
-    //   • Fewer nodes requested (8-10 total instead of 12-18)
-    //   • Short descriptions (1 sentence, not paragraphs)
-    //   • No "link" field (saves ~200 tokens of URLs the model invents)
-    //   • Compact example shows exact shape expected
+    // Prompt — kept as minimal as possible for small local models.
+    // Asks for only 6 nodes with short descriptions to keep output
+    // under ~800 tokens, achievable in 15-30s on most hardware.
     // ---------------------------------------------------------------
-    const prompt = `Generate a JSON "AI Tool Map" for: "${topic}".${variation > 0 ? ` Variation #${variation} — use different tools.` : ''}
+    const prompt = `Create a JSON skill tree for "${topic}".${variation > 0 ? ` Variation ${variation}.` : ''} Return JSON only.
 
-Return ONLY valid JSON with this structure:
-{"projectSummary":"1-2 sentences: a concrete example project in ${topic}","projectNodes":["id1","id2","id3","id4"],"nodes":[{"id":"short_id","label":"Name","category":"CORE|TOOL|INFRASTRUCTURE|CONCEPT|SKILL","description":"One sentence about how this is used in ${topic}.","difficulty":"Beginner|Intermediate|Advanced","tags":["tag1","tag2"]}],"links":[{"source":"from_id","target":"to_id","relationship":"enables"}]}
+{"projectSummary":"One sentence describing an example ${topic} project.","projectNodes":["core","n1","n2","n3"],"nodes":[{"id":"core","label":"${topic}","category":"CORE","description":"The foundation.","difficulty":"Beginner","tags":["foundation"]},{"id":"n1","label":"Tool 1","category":"INFRASTRUCTURE","description":"...","difficulty":"Beginner","tags":["infra"]},{"id":"n2","label":"Skill 1","category":"SKILL","description":"...","difficulty":"Intermediate","tags":["skill"]},{"id":"n3","label":"AI Tool","category":"TOOL","description":"...","difficulty":"Intermediate","tags":["ai"]},{"id":"n4","label":"Concept","category":"CONCEPT","description":"...","difficulty":"Advanced","tags":["concept"]},{"id":"n5","label":"Tool 2","category":"TOOL","description":"...","difficulty":"Advanced","tags":["ai"]}],"links":[{"source":"core","target":"n1","relationship":"enables"},{"source":"core","target":"n2","relationship":"enables"},{"source":"n1","target":"n3","relationship":"uses"},{"source":"n2","target":"n4","relationship":"explores"},{"source":"n3","target":"n5","relationship":"powers"}]}
 
-Rules:
-- 1 CORE node (the domain itself), 2 INFRASTRUCTURE, 2 SKILL, 3 TOOL, 1 CONCEPT = 9 nodes total
-- Links flow from prerequisite (source) to dependent (target)
-- projectNodes: 4 node IDs forming the example project path, starting from CORE`;
+Replace all names, descriptions, and tags with real tools and skills for ${topic}. Keep descriptions to ONE sentence each. Return 6 nodes total.`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -257,17 +300,13 @@ Rules:
         body: JSON.stringify({
           model,
           messages: [
-            {
-              role: 'system',
-              content: 'Respond with valid JSON only. No markdown, no explanation.'
-            },
             { role: 'user', content: prompt }
           ],
           format: 'json',
           stream: false,
           options: {
             temperature: Math.min(0.7 + (variation * 0.1), 1.0),
-            num_predict: 2048,
+            num_predict: 1024,
           }
         })
       });
@@ -287,7 +326,7 @@ Rules:
     return parseModelResponse(rawText);
 
   } catch (error) {
-    console.error("Ollama generation error:", error);
+    console.error("Ollama generation error:", error instanceof Error ? error.message : error);
     return FALLBACK_DATA;
   }
 };
