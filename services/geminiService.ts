@@ -35,6 +35,7 @@ export async function fetchAvailableModels(): Promise<OllamaModel[]> {
 // Default fallback data with 3 distinct CORE roots and bottom-up flow
 export const FALLBACK_DATA: SkillTreeData = {
   projectSummary: "Build a complete AI-powered workflow by combining your domain expertise with modern tools. Start with foundational infrastructure like Version Control and Automation, learn Vibe Coding to direct AI assistants, then leverage tools like Cursor and Ollama to generate, test, and deploy solutions — all while picking the right model for each task using Model Selection.",
+  projectNodes: ["root", "inf3", "sk1", "t4", "sk2"],
   nodes: [
     // --- LEVEL 0: ROOT (CORE) ---
     {
@@ -180,90 +181,110 @@ export const FALLBACK_DATA: SkillTreeData = {
   ]
 };
 
-export const generateSkillTree = async (topic: string, variation: number = 0, selectedModel?: string): Promise<SkillTreeData> => {
+// Timeout for Ollama requests — prevents the UI from hanging indefinitely
+const REQUEST_TIMEOUT_MS = 60_000; // 60 seconds
+
+/**
+ * Parse and validate raw Ollama output into SkillTreeData.
+ * Handles markdown fence stripping, JSON parsing, and field validation.
+ */
+function parseModelResponse(rawText: string): SkillTreeData {
+  // Strip markdown fences some models add despite instructions
+  const text = rawText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+
+  let data: SkillTreeData;
   try {
-    let model = selectedModel;
+    data = JSON.parse(text) as SkillTreeData;
+  } catch {
+    throw new Error("Model returned invalid JSON — try a different model or rephrase your query");
+  }
+
+  if (!Array.isArray(data.nodes) || !Array.isArray(data.links) || data.nodes.length < 3) {
+    throw new Error("Response missing required fields or too few nodes");
+  }
+
+  // Validate projectNodes: remove any IDs that don't correspond to real nodes
+  if (Array.isArray(data.projectNodes) && data.projectNodes.length > 0) {
+    const nodeIdSet = new Set(data.nodes.map(n => n.id));
+    data.projectNodes = data.projectNodes.filter(id => nodeIdSet.has(id));
+  }
+
+  return data;
+}
+
+export const generateSkillTree = async (
+  topic: string,
+  variation: number = 0,
+  selectedModel?: string
+): Promise<SkillTreeData> => {
+  try {
+    const model = selectedModel || undefined;
     if (!model) {
-      const models = await fetchAvailableModels();
-      model = models[0]?.name;
-    }
-    if (!model) {
-      console.warn("Ollama not reachable or no models installed. Using fallback data.");
+      console.warn("No model selected. Using fallback data.");
       return FALLBACK_DATA;
     }
 
-    const prompt = `You are a JSON generator. Respond ONLY with valid JSON, no markdown, no explanation.
+    // ---------------------------------------------------------------
+    // Prompt — kept short so small models (3B–8B) can handle it fast.
+    // Key changes vs. the old prompt:
+    //   • Fewer nodes requested (8-10 total instead of 12-18)
+    //   • Short descriptions (1 sentence, not paragraphs)
+    //   • No "link" field (saves ~200 tokens of URLs the model invents)
+    //   • Compact example shows exact shape expected
+    // ---------------------------------------------------------------
+    const prompt = `Generate a JSON "AI Tool Map" for: "${topic}".${variation > 0 ? ` Variation #${variation} — use different tools.` : ''}
 
-Create a practical "AI Tool Map" for the topic: "${topic}".
-This is variation #${variation} — use DIFFERENT tool combinations than previous variations.
+Return ONLY valid JSON with this structure:
+{"projectSummary":"1-2 sentences: a concrete example project in ${topic}","projectNodes":["id1","id2","id3","id4"],"nodes":[{"id":"short_id","label":"Name","category":"CORE|TOOL|INFRASTRUCTURE|CONCEPT|SKILL","description":"One sentence about how this is used in ${topic}.","difficulty":"Beginner|Intermediate|Advanced","tags":["tag1","tag2"]}],"links":[{"source":"from_id","target":"to_id","relationship":"enables"}]}
 
-STRUCTURE:
-1. CORE (1 node): The domain "${topic}" itself
-2. INFRASTRUCTURE (2-3 nodes): Foundational tools (GitHub, Docker, n8n, etc.)
-3. SKILL (2-4 nodes): Key skills like Prompt Engineering, API Integration, Data Analysis
-4. TOOL (4-6 nodes): Specific AI tools for ${topic} (ChatGPT, Cursor, Midjourney, Claude, etc.)
-5. CONCEPT (1-2 nodes): Methodologies or advanced techniques
-6. ADVANCED (2-3 nodes): Cutting-edge applications
+Rules:
+- 1 CORE node (the domain itself), 2 INFRASTRUCTURE, 2 SKILL, 3 TOOL, 1 CONCEPT = 9 nodes total
+- Links flow from prerequisite (source) to dependent (target)
+- projectNodes: 4 node IDs forming the example project path, starting from CORE`;
 
-Each node description MUST include a CONCRETE EXAMPLE of how it's used in ${topic}.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-Links flow from lower/prerequisite nodes (source) to higher/dependent nodes (target).
-
-Return this exact JSON structure:
-{
-  "projectSummary": "2-3 sentence example project using these tools in ${topic}",
-  "nodes": [
-    {
-      "id": "unique_id",
-      "label": "Tool Name",
-      "category": "CORE|TOOL|INFRASTRUCTURE|CONCEPT|SKILL",
-      "description": "Practical how-to with specific ${topic} use case",
-      "difficulty": "Beginner|Intermediate|Advanced",
-      "tags": ["tag1", "tag2"],
-      "link": "https://official-site.com"
+    let response: Response;
+    try {
+      response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: 'Respond with valid JSON only. No markdown, no explanation.'
+            },
+            { role: 'user', content: prompt }
+          ],
+          format: 'json',
+          stream: false,
+          options: {
+            temperature: Math.min(0.7 + (variation * 0.1), 1.0),
+            num_predict: 2048,
+          }
+        })
+      });
+    } finally {
+      clearTimeout(timeout);
     }
-  ],
-  "links": [
-    { "source": "prerequisite_id", "target": "dependent_id", "relationship": "enables" }
-  ]
-}`;
-
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a JSON-only response bot. Never output markdown fences, explanations, or anything outside the JSON object. Respond with valid JSON only.'
-          },
-          { role: 'user', content: prompt }
-        ],
-        format: 'json',
-        stream: false,
-        options: {
-          temperature: 0.7 + (variation * 0.1),
-          num_predict: 4096,
-        }
-      })
-    });
 
     if (!response.ok) {
-      throw new Error(`Ollama returned ${response.status}: ${response.statusText}`);
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`Ollama ${response.status}: ${errorBody || response.statusText}`);
     }
 
     const result = await response.json();
-    const text = result.message?.content;
-    if (!text) throw new Error("No content returned from Ollama");
+    const rawText: string = result.message?.content ?? '';
+    if (!rawText) throw new Error("No content returned from Ollama");
 
-    const data = JSON.parse(text) as SkillTreeData;
-
-    if (!data.nodes || !data.links || data.nodes.length < 3) {
-      throw new Error("Response missing required fields or too few nodes");
-    }
-
-    return data;
+    return parseModelResponse(rawText);
 
   } catch (error) {
     console.error("Ollama generation error:", error);

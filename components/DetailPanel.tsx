@@ -40,27 +40,33 @@ const EmptyState: React.FC<EmptyStateProps> = ({ userStack, data, currentTopic, 
     (l) => userStack.has(l.source) && userStack.has(l.target)
   );
 
+  const projectPathNodes = (data.projectNodes || [])
+    .map(id => data.nodes.find(n => n.id === id))
+    .filter(Boolean) as typeof data.nodes;
+
   return (
     <div className="h-full flex flex-col border-l border-slate-800 bg-slate-900/95 backdrop-blur-xl relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500"></div>
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500"></div>
 
       <div className="flex-none p-6 border-b border-slate-800">
-        <h3 className="text-lg font-bold text-white mb-1">Your stack</h3>
+        <h3 className="text-lg font-bold text-white mb-1">
+          {currentTopic ? currentTopic : 'AI Horizon'}
+        </h3>
         <p className="text-xs text-slate-400">
-          {stackNodes.length === 0
-            ? 'Select nodes to build your stack'
-            : `${stackNodes.length} node${stackNodes.length === 1 ? '' : 's'} selected`}
+          {projectPathNodes.length > 0
+            ? 'Example project path — nodes are highlighted in the graph'
+            : 'Select nodes to build your stack'}
         </p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
-        {/* AI Project Insight */}
+        {/* Example Project Section */}
         {data.projectSummary && (
           <div className="mb-5">
-            <div className="rounded-lg border border-orange-500/30 overflow-hidden">
-              <div className="bg-gradient-to-r from-orange-500/15 via-rose-500/10 to-purple-500/10 px-4 py-2.5 border-b border-orange-500/20 flex items-center gap-2">
-                <span className="text-sm">🧠</span>
-                <h4 className="text-xs font-bold text-orange-400 uppercase tracking-wider">AI Insight</h4>
+            <div className="rounded-lg border border-amber-500/40 overflow-hidden">
+              <div className="bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-rose-500/10 px-4 py-2.5 border-b border-amber-500/30 flex items-center gap-2">
+                <span className="text-sm">🚀</span>
+                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Example Project</h4>
                 {currentTopic && (
                   <span className="ml-auto text-[10px] text-slate-500 font-mono truncate max-w-[120px]">{currentTopic}</span>
                 )}
@@ -72,19 +78,58 @@ const EmptyState: React.FC<EmptyStateProps> = ({ userStack, data, currentTopic, 
           </div>
         )}
 
+        {/* Project Path - lit up nodes */}
+        {projectPathNodes.length > 0 && (
+          <div className="mb-5">
+            <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+              Project Path
+              <span className="text-slate-600 normal-case font-normal">(highlighted in graph)</span>
+            </h4>
+            <div className="relative">
+              {/* Vertical line connecting steps */}
+              <div className="absolute left-3.5 top-4 bottom-4 w-px bg-gradient-to-b from-amber-500/60 via-orange-500/40 to-rose-500/30"></div>
+              <div className="space-y-2">
+                {projectPathNodes.map((n, i) => (
+                  <button
+                    key={n.id}
+                    onClick={() => onNavigate(n.id)}
+                    className="w-full text-left flex items-start gap-3 p-2.5 rounded-lg hover:bg-slate-800/60 transition-colors group"
+                  >
+                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-amber-500/20 border-2 border-amber-400/60 flex items-center justify-center text-[10px] font-bold text-amber-300 z-10">
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <p className="text-sm font-medium text-white group-hover:text-amber-300 transition-colors truncate">{n.label}</p>
+                      <p className="text-[10px] text-slate-500">{n.category}</p>
+                    </div>
+                    <svg className="w-3.5 h-3.5 text-slate-600 group-hover:text-amber-400 flex-shrink-0 mt-1 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Stack section divider */}
+        {(projectPathNodes.length > 0 || data.projectSummary) && (
+          <div className="border-t border-slate-800/80 pt-4 mb-4">
+            <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Your Stack</h4>
+          </div>
+        )}
+
         {stackNodes.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-800/50 border border-slate-700 flex items-center justify-center">
-              <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-              </svg>
-            </div>
-            <p className="text-slate-500 text-sm mb-2">Your stack is empty</p>
-            <p className="text-slate-400 text-xs mb-3">Click nodes and add them to your stack. The panel stays open so you can quickly build your stack.</p>
-            <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 text-xs text-slate-300">
-              <p className="font-medium text-orange-400 mb-1">💡 Pro tip:</p>
-              <p>After adding 2+ nodes, click "Show Stack Connections" button at the bottom to see how they relate!</p>
-            </div>
+          <div className={projectPathNodes.length > 0 ? 'text-center py-3' : 'text-center py-8'}>
+            {projectPathNodes.length === 0 && (
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-800/50 border border-slate-700 flex items-center justify-center">
+                <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              </div>
+            )}
+            <p className="text-slate-500 text-xs">Click nodes in the graph to add them to your stack.</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -308,9 +353,10 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
   const isInStack = userStack.has(node.id);
 
-  // Compute connections using utility functions
-  const incoming = getIncomingConnections(node.id, data);
-  const outgoing = getOutgoingConnections(node.id, data);
+  // Compute connections using utility functions; filter out any whose source/target
+  // node was deleted from the graph (model may reference non-existent IDs)
+  const incoming = getIncomingConnections(node.id, data).filter(c => c.node !== undefined);
+  const outgoing = getOutgoingConnections(node.id, data).filter(c => c.node !== undefined);
   const categoryClasses = getCategoryClasses(node.category);
 
   return (
@@ -421,9 +467,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
             {incoming.length > 0 ? (
               <div className="space-y-2">
-                {incoming.map((connection, idx) => (
+                {incoming.map((connection) => (
                   <ConnectionItem
-                    key={idx}
+                    key={connection.node!.id}
                     connection={connection}
                     onNavigate={onNavigate}
                     onAddToStack={onAddToStack}
@@ -443,9 +489,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
             {outgoing.length > 0 ? (
               <div className="space-y-2">
-                {outgoing.map((connection, idx) => (
+                {outgoing.map((connection) => (
                   <ConnectionItem
-                    key={idx}
+                    key={connection.node!.id}
                     connection={connection}
                     onNavigate={onNavigate}
                     onAddToStack={onAddToStack}
@@ -465,8 +511,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Resources</h3>
         <ul className="space-y-2">
           {node.resources && node.resources.length > 0 ? (
-            node.resources.map((res, i) => (
-              <li key={i} className="flex items-center text-sm text-amber-400 hover:text-amber-300 transition-colors truncate">
+            node.resources.map((res) => (
+              <li key={res} className="flex items-center text-sm text-amber-400 hover:text-amber-300 transition-colors truncate">
                 <LinkIcon />
                 <a href={res} target="_blank" rel="noopener noreferrer" className="truncate hover:underline">
                   {res}

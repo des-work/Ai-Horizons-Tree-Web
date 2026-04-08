@@ -19,7 +19,7 @@ import { SIMULATION, LAYOUT, ANIMATION, COLORS } from '../constants/theme';
 
 interface GraphVisualizationProps {
   data: SkillTreeData;
-  onNodeClick: (node: SimulationNode | null) => void;
+  onNodeClick: (node: SimulationNode | null) => void; // null = deselect
   selectedNodeId: string | null;
   userStackIds?: Set<string>;
   width: number;
@@ -270,6 +270,8 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     if (!svgRef.current || !data.nodes.length) return;
 
     const svg = d3.select(svgRef.current);
+    // Stop any in-progress transitions before tearing down the DOM
+    svg.selectAll('*').interrupt();
     svg.selectAll('*').remove();
 
     // Create deep copies to avoid mutating original data
@@ -294,7 +296,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     svg.on('click', (event: MouseEvent) => {
       // Only deselect if clicking on SVG background (not a node)
       if (event.target === svgRef.current) {
-        onNodeClick(null as any); // Deselect current node
+        onNodeClick(null);
       }
     });
 
@@ -436,12 +438,13 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       );
 
     // Node circles (with glow filter)
+    const projectNodeSet = new Set(data.projectNodes || []);
     nodeGroup
       .append('circle')
       .attr('r', d => getNodeRadius(d.category))
       .attr('fill', COLORS.background.primary)
-      .attr('stroke', d => getNodeColor(d.category))
-      .attr('stroke-width', d => getNodeStrokeWidth(d.category))
+      .attr('stroke', d => projectNodeSet.has(d.id) ? '#f59e0b' : getNodeColor(d.category))
+      .attr('stroke-width', d => projectNodeSet.has(d.id) ? 5 : getNodeStrokeWidth(d.category))
       .attr('filter', 'url(#node-glow)')
       .on('click', (event: MouseEvent, d: SimulationNode) => {
         event.stopPropagation();
@@ -501,9 +504,12 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
       }
     }
 
-    // Cleanup on unmount
+    // Cleanup on unmount — stop simulation and interrupt any pending transitions
     return () => {
       simulation.stop();
+      if (svgRef.current) {
+        d3.select(svgRef.current).selectAll('*').interrupt();
+      }
     };
   }, [data, width, height, onNodeClick]);
 
@@ -515,15 +521,47 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
     const hasSelection = selectedNodeId || userStackIds.size > 0;
 
     if (!hasSelection) {
-      // No selection — reset everything to full visibility
-      svg.selectAll<SVGGElement, SimulationNode>('.node')
-        .transition().duration(ANIMATION.selectionTransition)
-        .style('opacity', 1);
-      svg.selectAll<SVGPathElement, SimulationLink>('.link')
-        .transition().duration(ANIMATION.selectionTransition)
-        .style('opacity', 1)
-        .attr('stroke', COLORS.link.default)
-        .attr('stroke-width', 2);
+      // No selection — check for project path mode
+      if (data.projectNodes && data.projectNodes.length > 0) {
+        const projectSet = new Set(data.projectNodes);
+        // Dim non-project nodes, highlight project path
+        svg.selectAll<SVGGElement, SimulationNode>('.node')
+          .transition().duration(ANIMATION.selectionTransition)
+          .style('opacity', d => projectSet.has(d.id) ? 1 : 0.35);
+        svg.selectAll<SVGPathElement, SimulationLink>('.link')
+          .transition().duration(ANIMATION.selectionTransition)
+          .style('opacity', (_d, i) => {
+            const lnk = data.links[i];
+            if (!lnk) return 0.15;
+            const src = getLinkNodeId(lnk.source);
+            const tgt = getLinkNodeId(lnk.target);
+            return projectSet.has(src) && projectSet.has(tgt) ? 0.9 : 0.1;
+          })
+          .attr('stroke', (_d, i) => {
+            const lnk = data.links[i];
+            if (!lnk) return COLORS.link.default;
+            const src = getLinkNodeId(lnk.source);
+            const tgt = getLinkNodeId(lnk.target);
+            return projectSet.has(src) && projectSet.has(tgt) ? '#f59e0b' : COLORS.link.default;
+          })
+          .attr('stroke-width', (_d, i) => {
+            const lnk = data.links[i];
+            if (!lnk) return 1.5;
+            const src = getLinkNodeId(lnk.source);
+            const tgt = getLinkNodeId(lnk.target);
+            return projectSet.has(src) && projectSet.has(tgt) ? 3 : 1.5;
+          });
+      } else {
+        // No selection and no project path — reset everything to full visibility
+        svg.selectAll<SVGGElement, SimulationNode>('.node')
+          .transition().duration(ANIMATION.selectionTransition)
+          .style('opacity', 1);
+        svg.selectAll<SVGPathElement, SimulationLink>('.link')
+          .transition().duration(ANIMATION.selectionTransition)
+          .style('opacity', 1)
+          .attr('stroke', COLORS.link.default)
+          .attr('stroke-width', 2);
+      }
       return;
     }
 
@@ -595,7 +633,7 @@ const GraphVisualization: React.FC<GraphVisualizationProps> = ({
         if (highlightLinkIndices.has(i)) return 2;
         return 1.5;
       });
-  }, [selectedNodeId, data.links, userStackIds, showStackConnections]);
+  }, [selectedNodeId, data.links, data.projectNodes, userStackIds, showStackConnections]);
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-transparent">

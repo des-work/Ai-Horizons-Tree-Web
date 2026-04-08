@@ -27,6 +27,7 @@ export interface SkillTreeData {
   nodes: SkillNode[];
   links: SkillLink[];
   projectSummary?: string; // Optional project example summary
+  projectNodes?: string[]; // Ordered node IDs forming the example project path
 }
 
 export interface SimulationNode extends SkillNode {

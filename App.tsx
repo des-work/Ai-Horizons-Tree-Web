@@ -17,16 +17,32 @@ import {
 // SUB-COMPONENTS
 // ============================================================================
 
-/** Loading overlay with spinner */
-const LoadingOverlay: React.FC = () => (
-  <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm">
-    <div className="relative w-16 h-16">
-      <div className="absolute top-0 left-0 w-full h-full border-4 border-slate-700 rounded-full opacity-25"></div>
-      <div className="absolute top-0 left-0 w-full h-full border-4 border-orange-500 rounded-full border-t-transparent animate-spin"></div>
+/** Loading overlay with spinner and elapsed timer so the user knows it's working */
+const LoadingOverlay: React.FC = () => {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+      <div className="relative w-16 h-16">
+        <div className="absolute top-0 left-0 w-full h-full border-4 border-slate-700 rounded-full opacity-25"></div>
+        <div className="absolute top-0 left-0 w-full h-full border-4 border-orange-500 rounded-full border-t-transparent animate-spin"></div>
+      </div>
+      <p className="mt-4 text-orange-400 font-mono text-sm animate-pulse">
+        {elapsed < 5
+          ? 'Illuminating Horizon...'
+          : elapsed < 15
+            ? `Generating with local model... ${elapsed}s`
+            : `Still working — local models can take a moment... ${elapsed}s`}
+      </p>
     </div>
-    <p className="mt-4 text-orange-400 font-mono text-sm animate-pulse">Illuminating Horizon...</p>
-  </div>
-);
+  );
+};
 
 /** Error banner component */
 interface ErrorBannerProps {
@@ -307,7 +323,8 @@ const App: React.FC = () => {
 
   // Refs and hooks
   const graphContainerRef = useRef<HTMLDivElement>(null);
-  const lastApiCallRef = useRef<number>(0);
+  // Initialize far in the past so the very first call is never blocked by the cooldown
+  const lastApiCallRef = useRef<number>(Date.now() - COOLDOWN_MS);
   const { width, height } = useResizeObserver(graphContainerRef);
 
   // Sync API count from localStorage on mount + fetch Ollama models
@@ -317,8 +334,9 @@ const App: React.FC = () => {
     fetchAvailableModels().then((models) => {
       setOllamaModels(models);
       setOllamaConnected(models.length > 0);
-      if (models.length > 0 && !selectedModel) {
-        setSelectedModel(models[0].name);
+      if (models.length > 0) {
+        // Use functional update to avoid stale closure over selectedModel
+        setSelectedModel(prev => prev || models[0].name);
       }
     });
   }, []);
@@ -358,22 +376,36 @@ const App: React.FC = () => {
 
     try {
       const newData = await generateSkillTree(prompt.trim(), newVariation, selectedModel || undefined);
+
+      // generateSkillTree never throws — it returns FALLBACK_DATA on failure.
+      // Detect this by checking for projectSummary (FALLBACK_DATA always has one,
+      // but so does a real result). Instead, check for no nodes OR that the data
+      // object is the exact FALLBACK_DATA reference returned on error.
+      const isFallback = newData === FALLBACK_DATA;
+
       setData(newData);
       setUserStack(new Set());
 
-      // Cache and count only real API results (not fallback data)
-      if (newData.projectSummary) {
+      if (isFallback) {
+        setError(
+          ollamaConnected
+            ? 'The model returned an unusable response. Showing default data — try a different model or rephrase your query.'
+            : 'Ollama is not running. Start Ollama and pull a model, then try again.'
+        );
+      } else {
+        // Cache and count only real API results
         setCachedResult(prompt.trim(), newVariation, newData);
         setApiCallCount(incrementApiCallCount());
       }
 
-      // Open sidebar to show AI insight
       setSelectedNode(null);
       setIsSidebarOpen(true);
     } catch (err) {
+      // generateSkillTree swallows errors internally, but guard anyway
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       console.error('Failed to generate tree:', err);
       setError(errorMessage);
+      setIsSidebarOpen(true); // Re-open sidebar so project overview remains visible
     } finally {
       setIsLoading(false);
     }
@@ -393,9 +425,9 @@ const App: React.FC = () => {
 
   const handleNodeClick = useCallback((node: SkillNode | null) => {
     if (node === null) {
-      // Clicking background - deselect and close sidebar
+      // Clicking background - deselect but keep sidebar open to show project overview
       setSelectedNode(null);
-      setIsSidebarOpen(false);
+      setIsSidebarOpen(true);
     } else {
       setSelectedNode(node);
       setIsSidebarOpen(true);
