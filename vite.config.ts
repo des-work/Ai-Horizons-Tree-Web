@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       define: {
         'process.env.OLLAMA_URL': JSON.stringify(env.OLLAMA_URL || 'http://localhost:11434'),
+        'process.env.OPENWEBUI_URL': JSON.stringify(env.OPENWEBUI_URL || ''),
+        'process.env.OPENWEBUI_API_KEY': JSON.stringify(env.OPENWEBUI_API_KEY || ''),
       },
       resolve: {
         alias: {

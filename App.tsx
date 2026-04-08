@@ -3,7 +3,7 @@ import GraphVisualization from './components/GraphVisualization';
 import DetailPanel from './components/DetailPanel';
 import AddNodeModal from './components/AddNodeModal';
 import SunsetBackground from './components/SunsetBackground';
-import { generateProjectInsight, FALLBACK_DATA, fetchAvailableModels, OllamaModel } from './services/geminiService';
+import { generateProjectInsight, FALLBACK_DATA, fetchAvailableModels, AIModel, AIProvider } from './services/geminiService';
 import { SkillTreeData, SkillNode, SkillLink } from './types';
 import { useResizeObserver } from './hooks/useResizeObserver';
 import {
@@ -90,16 +90,17 @@ const ApiCallCounter: React.FC<{ apiCalls: number; fromCache: boolean }> = ({
   </div>
 );
 
-/** Model selector dropdown for local Ollama models */
+/** Model selector dropdown supporting multiple providers */
 interface ModelSelectorProps {
-  models: OllamaModel[];
+  models: AIModel[];
   selectedModel: string;
-  onSelect: (model: string) => void;
+  selectedProvider: AIProvider;
+  onSelect: (model: string, provider: AIProvider) => void;
   isLoading: boolean;
-  ollamaConnected: boolean;
+  connected: boolean;
 }
 
-const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, onSelect, isLoading, ollamaConnected }) => {
+const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, selectedProvider, onSelect, isLoading, connected }) => {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -114,12 +115,17 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, on
   }, []);
 
   const formatSize = (bytes: number) => {
+    if (!bytes) return '';
     const gb = bytes / (1024 * 1024 * 1024);
     return gb >= 1 ? `${gb.toFixed(1)}GB` : `${(bytes / (1024 * 1024)).toFixed(0)}MB`;
   };
 
+  const ollamaModels = models.filter(m => m.provider === 'ollama');
+  const openwebuiModels = models.filter(m => m.provider === 'openwebui');
+
+  const providerLabel = selectedProvider === 'openwebui' ? 'WebUI' : 'Local';
   const displayName = selectedModel
-    ? selectedModel.split(':')[0]
+    ? `${selectedModel.split(':')[0]}`
     : 'No model';
 
   return (
@@ -129,37 +135,43 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, on
         onClick={() => setOpen(!open)}
         disabled={isLoading}
         className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium transition-all ${
-          ollamaConnected
+          connected
             ? 'border-slate-600 hover:border-orange-500/50 text-slate-300 hover:text-orange-400 bg-slate-800/50'
             : 'border-red-800 text-red-400 bg-red-950/30'
         } disabled:opacity-50`}
-        title={ollamaConnected ? `Active model: ${selectedModel}` : 'Ollama not connected'}
+        title={connected ? `${providerLabel}: ${selectedModel}` : 'No AI provider connected'}
       >
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${ollamaConnected ? 'bg-green-400' : 'bg-red-500'}`} />
-        <span className="max-w-[100px] truncate">{displayName}</span>
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${connected ? 'bg-green-400' : 'bg-red-500'}`} />
+        <span className="max-w-[120px] truncate">{displayName}</span>
+        <span className="text-[9px] text-slate-500">{providerLabel}</span>
         <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50">
+        <div className="absolute right-0 top-full mt-1 w-72 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50">
+          {/* Ollama section */}
           <div className="px-3 py-2 border-b border-slate-800">
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Local Models (Ollama)</p>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              Local Models (Ollama)
+              {ollamaModels.length > 0 && <span className="ml-1 text-green-500">●</span>}
+            </p>
           </div>
-          {models.length === 0 ? (
-            <div className="px-3 py-4 text-center">
-              <p className="text-xs text-slate-500">No models found</p>
+          {ollamaModels.length === 0 ? (
+            <div className="px-3 py-3 text-center border-b border-slate-800">
+              <p className="text-xs text-slate-500">No local models found</p>
               <p className="text-[10px] text-slate-600 mt-1">Run <code className="text-orange-400">ollama pull llama3.2</code></p>
             </div>
           ) : (
-            <div className="max-h-48 overflow-y-auto">
-              {models.map((m) => {
-                const isActive = m.name === selectedModel;
+            <div className="max-h-36 overflow-y-auto border-b border-slate-800">
+              {ollamaModels.map((m) => {
+                const isActive = m.name === selectedModel && selectedProvider === 'ollama';
+                const sizeStr = formatSize(m.size);
                 return (
                   <button
-                    key={m.name}
-                    onClick={() => { onSelect(m.name); setOpen(false); }}
+                    key={`ollama-${m.name}`}
+                    onClick={() => { onSelect(m.name, 'ollama'); setOpen(false); }}
                     className={`w-full text-left px-3 py-2 flex items-center gap-3 transition-colors ${
                       isActive
                         ? 'bg-orange-500/10 border-l-2 border-orange-500'
@@ -174,12 +186,57 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, on
                         {m.parameterSize && <span>{m.parameterSize}</span>}
                         {m.parameterSize && m.family && <span> · </span>}
                         {m.family && <span>{m.family}</span>}
-                        {(m.parameterSize || m.family) && <span> · </span>}
-                        <span>{formatSize(m.size)}</span>
+                        {(m.parameterSize || m.family) && sizeStr && <span> · </span>}
+                        {sizeStr && <span>{sizeStr}</span>}
                       </p>
                     </div>
                     {isActive && (
                       <svg className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Open WebUI section */}
+          <div className="px-3 py-2 border-b border-slate-800">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              Open WebUI
+              {openwebuiModels.length > 0 && <span className="ml-1 text-blue-400">●</span>}
+            </p>
+          </div>
+          {openwebuiModels.length === 0 ? (
+            <div className="px-3 py-3 text-center">
+              <p className="text-xs text-slate-500">Not configured</p>
+              <p className="text-[10px] text-slate-600 mt-1">Set <code className="text-blue-400">OPENWEBUI_URL</code> & <code className="text-blue-400">OPENWEBUI_API_KEY</code> in .env</p>
+            </div>
+          ) : (
+            <div className="max-h-36 overflow-y-auto">
+              {openwebuiModels.map((m) => {
+                const isActive = m.name === selectedModel && selectedProvider === 'openwebui';
+                return (
+                  <button
+                    key={`owui-${m.name}`}
+                    onClick={() => { onSelect(m.name, 'openwebui'); setOpen(false); }}
+                    className={`w-full text-left px-3 py-2 flex items-center gap-3 transition-colors ${
+                      isActive
+                        ? 'bg-blue-500/10 border-l-2 border-blue-500'
+                        : 'hover:bg-slate-800 border-l-2 border-transparent'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-medium truncate ${isActive ? 'text-blue-400' : 'text-slate-300'}`}>
+                        {m.name.split(':')[0]}
+                      </p>
+                      {m.family && (
+                        <p className="text-[10px] text-slate-500">{m.family}</p>
+                      )}
+                    </div>
+                    {isActive && (
+                      <svg className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                       </svg>
                     )}
@@ -313,9 +370,10 @@ const App: React.FC = () => {
   const [apiCallCount, setApiCallCount] = useState<number>(0);
   const [showAddModal, setShowAddModal] = useState(false);
   const [userStack, setUserStack] = useState<Set<string>>(new Set());
-  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
+  const [allModels, setAllModels] = useState<AIModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
-  const [ollamaConnected, setOllamaConnected] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('ollama');
+  const [anyProviderConnected, setAnyProviderConnected] = useState(false);
 
   // Refs and hooks
   const graphContainerRef = useRef<HTMLDivElement>(null);
@@ -327,10 +385,11 @@ const App: React.FC = () => {
     setApiCallCount(getApiCallCount());
 
     fetchAvailableModels().then((models) => {
-      setOllamaModels(models);
-      setOllamaConnected(models.length > 0);
+      setAllModels(models);
+      setAnyProviderConnected(models.length > 0);
       if (models.length > 0) {
         setSelectedModel(prev => prev || models[0].name);
+        setSelectedProvider(models[0].provider);
       }
     });
   }, []);
@@ -353,7 +412,8 @@ const App: React.FC = () => {
       const insight = await generateProjectInsight(
         prompt.trim(),
         FALLBACK_DATA.nodes.map(n => ({ id: n.id, label: n.label })),
-        selectedModel || undefined
+        selectedModel || undefined,
+        selectedProvider
       );
 
       if (insight) {
@@ -366,9 +426,9 @@ const App: React.FC = () => {
         setApiCallCount(incrementApiCallCount());
       } else {
         setError(
-          ollamaConnected
-            ? 'Generation failed — try a different model (e.g. llama3.2 or mistral) from the model selector.'
-            : 'Ollama is not running. Start Ollama and pull a model, then try again.'
+          anyProviderConnected
+            ? 'Generation failed — try a different model from the model selector.'
+            : 'No AI provider connected. Start Ollama or configure Open WebUI in .env, then try again.'
         );
       }
 
@@ -507,11 +567,15 @@ const App: React.FC = () => {
             <div className="h-4 w-px bg-slate-700 hidden sm:block"></div>
             <ApiCallCounter apiCalls={apiCallCount} fromCache={false} />
             <ModelSelector
-              models={ollamaModels}
+              models={allModels}
               selectedModel={selectedModel}
-              onSelect={setSelectedModel}
+              selectedProvider={selectedProvider}
+              onSelect={(model, provider) => {
+                setSelectedModel(model);
+                setSelectedProvider(provider);
+              }}
               isLoading={isLoading}
-              ollamaConnected={ollamaConnected}
+              connected={anyProviderConnected}
             />
             <span className="font-mono text-xs opacity-50 hidden sm:inline">v4.3.0-horizon</span>
           </div>

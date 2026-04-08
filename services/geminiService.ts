@@ -2,15 +2,35 @@
 import { SkillTreeData, NodeType } from "../types";
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const OPENWEBUI_URL = process.env.OPENWEBUI_URL || '';
+const OPENWEBUI_API_KEY = process.env.OPENWEBUI_API_KEY || '';
 
-export interface OllamaModel {
+export type AIProvider = 'ollama' | 'openwebui';
+
+export interface AIModel {
   name: string;
   size: number;
   parameterSize: string;
   family: string;
+  provider: AIProvider;
 }
 
-export async function fetchAvailableModels(): Promise<OllamaModel[]> {
+// Keep backward-compat alias
+export type OllamaModel = AIModel;
+
+// ---------------------------------------------------------------------------
+// Model fetching
+// ---------------------------------------------------------------------------
+
+export async function fetchAvailableModels(): Promise<AIModel[]> {
+  const results = await Promise.all([
+    fetchOllamaModels(),
+    fetchOpenWebUIModels(),
+  ]);
+  return results.flat();
+}
+
+async function fetchOllamaModels(): Promise<AIModel[]> {
   try {
     const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
     if (!res.ok) return [];
@@ -21,25 +41,52 @@ export async function fetchAvailableModels(): Promise<OllamaModel[]> {
       details?: { parameter_size?: string; family?: string };
     }> = data.models || [];
 
-    const mapped = models.map(m => ({
+    const mapped: AIModel[] = models.map(m => ({
       name: m.name,
       size: m.size,
       parameterSize: m.details?.parameter_size || '',
       family: m.details?.family || '',
+      provider: 'ollama' as const,
     }));
 
     // Sort so fast text models come first. Vision/VL models are too slow for JSON generation.
-    // Preferred models (known-good for structured JSON) get priority 0,
-    // generic text models get 1, vision models get 2.
     const modelPriority = (name: string): number => {
       const n = name.toLowerCase();
-      if (/\b(vl|vision|llava|moondream)\b/.test(n)) return 2; // vision — slow
-      if (/\b(llama|mistral|gemma|qwen2?\.?5?|phi|deepseek)\b/.test(n) && !/vl/.test(n)) return 0; // fast text
-      return 1; // unknown — middle
+      if (/\b(vl|vision|llava|moondream)\b/.test(n)) return 2;
+      if (/\b(llama|mistral|gemma|qwen2?\.?5?|phi|deepseek)\b/.test(n) && !/vl/.test(n)) return 0;
+      return 1;
     };
     mapped.sort((a, b) => modelPriority(a.name) - modelPriority(b.name));
 
     return mapped;
+  } catch {
+    return [];
+  }
+}
+
+async function fetchOpenWebUIModels(): Promise<AIModel[]> {
+  if (!OPENWEBUI_URL) return [];
+  try {
+    const res = await fetch(`${OPENWEBUI_URL}/api/models`, {
+      headers: {
+        'Authorization': `Bearer ${OPENWEBUI_API_KEY}`,
+      },
+    });
+    if (!res.ok) return [];
+    const body = await res.json();
+
+    // Open WebUI returns OpenAI-compatible format: { data: [{ id, ... }] }
+    // but also may return { models: [...] } depending on version
+    const models: Array<{ id: string; name?: string; owned_by?: string }> =
+      body.data || body.models || [];
+
+    return models.map(m => ({
+      name: m.id,
+      size: 0,
+      parameterSize: '',
+      family: m.owned_by || 'openwebui',
+      provider: 'openwebui' as const,
+    }));
   } catch {
     return [];
   }
@@ -194,8 +241,8 @@ export const FALLBACK_DATA: SkillTreeData = {
   ]
 };
 
-// Timeout for Ollama requests
-const REQUEST_TIMEOUT_MS = 60_000; // 60s — this is a small query now
+// Timeout for requests
+const REQUEST_TIMEOUT_MS = 60_000;
 
 /**
  * Result from the AI: which nodes to highlight and a project description.
@@ -207,60 +254,116 @@ export interface ProjectInsight {
 }
 
 /**
- * Ask the local model which of the existing graph nodes are relevant
- * to a given topic/job, and to describe an example project using them.
- * This is a lightweight query (~200 output tokens) so it's fast even on small models.
+ * Build the prompt used for both providers.
  */
-export async function generateProjectInsight(
+function buildInsightPrompt(
   topic: string,
-  existingNodes: { id: string; label: string }[],
-  selectedModel?: string
-): Promise<ProjectInsight | null> {
-  try {
-    const model = selectedModel || undefined;
-    if (!model) return null;
-
-    const nodeList = existingNodes.map(n => `${n.id}: ${n.label}`).join(', ');
-
-    const prompt = `Given these tools/skills: [${nodeList}]
+  existingNodes: { id: string; label: string }[]
+): string {
+  const nodeList = existingNodes.map(n => `${n.id}: ${n.label}`).join(', ');
+  return `Given these tools/skills: [${nodeList}]
 
 A user is interested in "${topic}". Pick 3-5 of these tools that would be most useful for a ${topic} project. Return JSON only:
 {"projectSummary":"2-3 sentences describing a concrete example project in ${topic} using the selected tools. Be specific about what gets built.","projectNodes":["id1","id2","id3"]}
 
 Use ONLY IDs from the list above. Return valid JSON only, nothing else.`;
+}
+
+/**
+ * Send the insight query to Ollama's /api/chat endpoint.
+ */
+async function queryOllama(
+  prompt: string,
+  model: string,
+  signal: AbortSignal
+): Promise<string> {
+  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      format: 'json',
+      stream: false,
+      options: {
+        temperature: 0.7,
+        num_predict: 300,
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Ollama ${response.status}: ${errorBody || response.statusText}`);
+  }
+
+  const result = await response.json();
+  return result.message?.content ?? '';
+}
+
+/**
+ * Send the insight query to an OpenAI-compatible endpoint (Open WebUI).
+ */
+async function queryOpenWebUI(
+  prompt: string,
+  model: string,
+  signal: AbortSignal
+): Promise<string> {
+  const response = await fetch(`${OPENWEBUI_URL}/api/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENWEBUI_API_KEY}`,
+    },
+    signal,
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
+      max_tokens: 300,
+      temperature: 0.7,
+    })
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Open WebUI ${response.status}: ${errorBody || response.statusText}`);
+  }
+
+  const result = await response.json();
+  return result.choices?.[0]?.message?.content ?? '';
+}
+
+/**
+ * Ask the local model (or Open WebUI model) which of the existing graph nodes
+ * are relevant to a given topic/job, and to describe an example project using them.
+ */
+export async function generateProjectInsight(
+  topic: string,
+  existingNodes: { id: string; label: string }[],
+  selectedModel?: string,
+  provider: AIProvider = 'ollama'
+): Promise<ProjectInsight | null> {
+  try {
+    const model = selectedModel || undefined;
+    if (!model) return null;
+
+    const prompt = buildInsightPrompt(topic, existingNodes);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    let response: Response;
+    let rawText: string;
     try {
-      response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          format: 'json',
-          stream: false,
-          options: {
-            temperature: 0.7,
-            num_predict: 300,
-          }
-        })
-      });
+      rawText = provider === 'openwebui'
+        ? await queryOpenWebUI(prompt, model, controller.signal)
+        : await queryOllama(prompt, model, controller.signal);
     } finally {
       clearTimeout(timeout);
     }
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(`Ollama ${response.status}: ${errorBody || response.statusText}`);
-    }
-
-    const result = await response.json();
-    const rawText: string = result.message?.content ?? '';
-    if (!rawText) throw new Error("No content returned from Ollama");
+    if (!rawText) throw new Error("No content returned from model");
 
     // Strip markdown fences
     const text = rawText
